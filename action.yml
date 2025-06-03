@@ -1,0 +1,31 @@
+name: 'DiffScope Code Review'
+description: 'Automated code review engine for pull requests'
+author: 'Jonathan Haas'
+branding:
+  icon: 'eye'
+  color: 'blue'
+
+inputs:
+  model:
+    description: 'LLM model to use (e.g., gpt-4o, ollama:codellama)'
+    required: false
+    default: 'gpt-4o'
+  output-format:
+    description: 'Output format (json, patch, markdown)'
+    required: false
+    default: 'json'
+  openai-api-key:
+    description: 'OpenAI API key (can also use OPENAI_API_KEY env var)'
+    required: false
+
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/haasonsaas/diffscope:latest'
+  args:
+    - review
+    - '--model'
+    - ${{ inputs.model }}
+    - '--output-format'
+    - ${{ inputs.output-format }}
+  env:
+    OPENAI_API_KEY: ${{ inputs.openai-api-key }}

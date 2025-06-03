@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  diffscope:
+    build: .
+    image: diffscope:latest
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DIFFSCOPE_MODEL=${DIFFSCOPE_MODEL:-gpt-4o}
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: review --diff /workspace/example.diff
+    
+  diffscope-ollama:
+    build: .
+    image: diffscope:latest
+    depends_on:
+      - ollama
+    environment:
+      - DIFFSCOPE_MODEL=ollama:codellama
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: review --diff /workspace/example.diff --model ollama:codellama
+    
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      
+volumes:
+  ollama_data:
