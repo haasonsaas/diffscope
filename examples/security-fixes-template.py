@@ -1,6 +1,7 @@
-# Security and Performance Fixes for EvalOps Worker PR
+# Security and Performance Fixes Template
+# Example fixes for common vulnerabilities in Python web applications
 # 
-# CRITICAL FIXES NEEDED:
+# CRITICAL FIXES DEMONSTRATED:
 
 """
 1. SQL Injection Fix in organizations.py
