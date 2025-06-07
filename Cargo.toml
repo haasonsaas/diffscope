@@ -1,6 +1,6 @@
 [package]
 name = "diffscope"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 authors = ["Jonathan Haas <jonathan@haas.holdings>"]
 description = "A composable code review engine with smart analysis, confidence scoring, and professional reporting"

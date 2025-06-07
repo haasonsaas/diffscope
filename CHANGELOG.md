@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2025-06-06
+
+### Changed
+- **Documentation**: Cleaned up README with more practical and realistic examples
+- **Installation**: Updated examples to use `cargo install diffscope` from crates.io
+- **Usage Examples**: Simplified and focused on common developer workflows
+- **Output Examples**: More realistic security vulnerability demonstrations
+- **Configuration**: Streamlined examples for better clarity
+
 ## [0.4.0] - 2025-06-06
 
 ### Added
