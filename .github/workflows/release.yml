@@ -165,6 +165,7 @@ jobs:
           files: |
             target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
             target/${{ matrix.target }}/release/${{ matrix.asset_name }}.sha256
+          fail_on_unmatched_files: false
 
   build-docker:
     name: Build and Push Docker Image
