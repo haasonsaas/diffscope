@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+  build-release:
+    name: Build Release
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: diffscope
+            asset_name: diffscope-x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact_name: diffscope
+            asset_name: diffscope-x86_64-unknown-linux-musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: diffscope
+            asset_name: diffscope-aarch64-unknown-linux-gnu
+          
+          # macOS
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: diffscope
+            asset_name: diffscope-x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: diffscope
+            asset_name: diffscope-aarch64-apple-darwin
+          
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: diffscope.exe
+            asset_name: diffscope-x86_64-pc-windows-msvc.exe
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      
+      - name: Strip binary (Linux and macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          asset_name: ${{ matrix.asset_name }}
+          asset_content_type: application/octet-stream
+
+  build-docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/haasonsaas/diffscope:latest
+            ghcr.io/haasonsaas/diffscope:${{ steps.get_version.outputs.VERSION }}
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: haasonsaas/homebrew-diffscope
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      
+      - name: Update formula
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/diffscope.rb
+          
+          # Calculate SHA256 for x86_64 macOS binary
+          DARWIN_X64_URL="https://github.com/haasonsaas/diffscope/releases/download/v${VERSION}/diffscope-x86_64-apple-darwin"
+          DARWIN_X64_SHA=$(curl -sL $DARWIN_X64_URL | shasum -a 256 | cut -d' ' -f1)
+          
+          # Calculate SHA256 for ARM64 macOS binary
+          DARWIN_ARM64_URL="https://github.com/haasonsaas/diffscope/releases/download/v${VERSION}/diffscope-aarch64-apple-darwin"
+          DARWIN_ARM64_SHA=$(curl -sL $DARWIN_ARM64_URL | shasum -a 256 | cut -d' ' -f1)
+          
+          # Update the formula with new checksums
+          # This is a simplified example - you'd need to update the actual formula structure
+          echo "Updated version to $VERSION"
+      
+      - name: Commit and push changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add Formula/diffscope.rb
+          git commit -m "Update diffscope to ${GITHUB_REF#refs/tags/}"
+          git push

@@ -20,20 +20,48 @@ A composable code review engine for automated diff analysis.
 
 ## Quick Start
 
-### Install via Homebrew (macOS/Linux)
+### Install Pre-built Binary (Recommended)
+
+#### Linux/macOS
+```bash
+curl -sSL https://raw.githubusercontent.com/haasonsaas/diffscope/main/install.sh | sh
+```
+
+#### Windows (PowerShell)
+```powershell
+iwr -useb https://raw.githubusercontent.com/haasonsaas/diffscope/main/install.ps1 | iex
+```
+
+#### Manual Download
+Download the latest binary for your platform from the [releases page](https://github.com/haasonsaas/diffscope/releases/latest):
+- Linux: `diffscope-x86_64-unknown-linux-musl`
+- macOS Intel: `diffscope-x86_64-apple-darwin`
+- macOS Apple Silicon: `diffscope-aarch64-apple-darwin`
+- Windows: `diffscope-x86_64-pc-windows-msvc.exe`
+
+### Install via Package Managers
+
+#### Homebrew (macOS/Linux)
 ```bash
 brew tap haasonsaas/diffscope
 brew install diffscope
 ```
 
-### Install from crates.io
+#### Cargo (requires Rust)
 ```bash
 cargo install diffscope
 ```
 
 ### Docker
 ```bash
+# Pull the latest image
+docker pull ghcr.io/haasonsaas/diffscope:latest
+
+# Run with current directory mounted
 docker run --rm -v $(pwd):/workspace ghcr.io/haasonsaas/diffscope:latest review --diff /workspace/pr.diff
+
+# Create an alias for convenience
+alias diffscope='docker run --rm -v $(pwd):/workspace ghcr.io/haasonsaas/diffscope:latest'
 ```
 
 ## Usage
@@ -534,6 +562,21 @@ The summary includes:
 ## Contributing
 
 Contributions are welcome! Please open an issue first to discuss what you would like to change.
+
+## Supported Platforms
+
+DiffScope provides pre-built binaries for the following platforms:
+
+| Platform | Architecture | Binary |
+|----------|-------------|---------|
+| Linux | x86_64 | `diffscope-x86_64-unknown-linux-musl` (static, works on all distros) |
+| Linux | x86_64 | `diffscope-x86_64-unknown-linux-gnu` |
+| Linux | ARM64 | `diffscope-aarch64-unknown-linux-gnu` |
+| macOS | Intel (x86_64) | `diffscope-x86_64-apple-darwin` |
+| macOS | Apple Silicon (ARM64) | `diffscope-aarch64-apple-darwin` |
+| Windows | x86_64 | `diffscope-x86_64-pc-windows-msvc.exe` |
+
+All binaries are automatically built and uploaded with each release.
 
 ## Support
 

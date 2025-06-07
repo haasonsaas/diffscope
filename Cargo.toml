@@ -37,7 +37,3 @@ mockito = "1.2"
 name = "diffscope"
 path = "src/main.rs"
 
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true
