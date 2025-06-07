@@ -3,6 +3,9 @@ FROM rust:alpine AS builder
 
 RUN apk add --no-cache musl-dev
 
+# Install the musl target
+RUN rustup target add x86_64-unknown-linux-musl
+
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
