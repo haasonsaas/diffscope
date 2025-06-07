@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2025-06-06
+
+### Added
+- **Pre-built Binaries**: Automated binary distribution for all major platforms
+- **Release Automation**: GitHub Actions workflow for multi-platform builds
+- **Easy Installation**: One-line install scripts for Linux/macOS and Windows
+- **Docker Multi-arch**: Support for AMD64 and ARM64 architectures
+- **Cross-compilation**: Build configuration for 6 different target platforms
+
+### Changed
+- **Binary Size**: Optimized release builds with LTO and stripping for smaller downloads
+- **Docker Image**: Switched to Alpine Linux for minimal container size
+- **Installation Docs**: Added comprehensive binary installation instructions
+
+### Supported Platforms
+- Linux x86_64 (GNU and MUSL variants)
+- Linux ARM64
+- macOS Intel (x86_64)
+- macOS Apple Silicon (ARM64)
+- Windows x86_64 (MSVC)
+
+## [0.5.0] - 2025-06-06
+
+### Added
+- **PR Summary Generation**: Create executive summaries with statistics and risk analysis
+- **Interactive Commands**: Respond to PR comments with @diffscope commands
+- **Changelog Generation**: Generate changelogs and release notes from git history
+- **Path-Based Configuration**: Customize review behavior for different directories
+- **Focus Areas**: Configure specific review focuses per path (security, performance, etc.)
+- **Severity Overrides**: Elevate or downgrade issue severity based on file paths
+
+### Changed
+- **Smart Review**: Enhanced with confidence scoring and fix effort estimation
+- **Output Format**: Improved markdown with emojis and professional formatting
+
 ## [0.4.4] - 2025-06-06
 
 ### Fixed
