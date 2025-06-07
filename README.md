@@ -23,9 +23,9 @@ brew tap haasonsaas/diffscope
 brew install diffscope
 ```
 
-### Install from source
+### Install from crates.io
 ```bash
-cargo install --git https://github.com/Haasonsaas/diffscope
+cargo install diffscope
 ```
 
 ### Docker
@@ -35,69 +35,69 @@ docker run --rm -v $(pwd):/workspace ghcr.io/haasonsaas/diffscope:latest review 
 
 ## Usage
 
-### Review a diff file
+### Basic Usage
 ```bash
-diffscope review --diff changes.diff
-```
-
-### Review from stdin
-```bash
+# Review your current changes
 git diff | diffscope review
+
+# Review a specific file diff
+diffscope review --diff patch.diff
+
+# Get enhanced analysis with smart review
+git diff | diffscope smart-review
 ```
 
-### Git integration
+### Git Integration
 ```bash
-# Review uncommitted changes
-diffscope git uncommitted
-
-# Review staged changes
+# Review what you're about to commit
 diffscope git staged
 
-# Review changes from a branch
+# Review all uncommitted changes  
+diffscope git uncommitted
+
+# Compare your branch to main
 diffscope git branch main
 
-# Suggest commit message for staged changes
+# Get AI-powered commit message suggestions
 diffscope git suggest
 ```
 
-### Pull Request review
+### Pull Request Review
 ```bash
-# Review current PR
+# Review the current PR
 diffscope pr
 
-# Review specific PR
+# Review a specific PR number
 diffscope pr --number 123
 
-# Post comments directly to PR
+# Post review comments directly to GitHub
 diffscope pr --post-comments
 ```
 
 ### Smart Review (Enhanced Analysis)
 ```bash
-# Comprehensive analysis with executive summary
-diffscope smart-review --diff changes.diff
-
-# Enhanced review from stdin  
+# Get professional-grade analysis with confidence scoring
 git diff | diffscope smart-review
 
-# Save detailed report to file
-diffscope smart-review --diff pr.patch --output detailed-report.md
+# Generate executive summary report
+diffscope smart-review --diff changes.patch --output report.md
+
+# Review with specific AI model
+git diff | diffscope smart-review --model claude-3-5-sonnet-20241022
 ```
 
-### Use different models
+### AI Model Configuration
 ```bash
-# OpenAI GPT-4
-export OPENAI_API_KEY=your-openai-key
-diffscope review --model gpt-4o --diff changes.diff
+# OpenAI (default)
+export OPENAI_API_KEY=your-key
+git diff | diffscope review --model gpt-4o
 
 # Anthropic Claude
-export ANTHROPIC_API_KEY=your-anthropic-key
-diffscope review --model claude-3-5-sonnet-20241022 --diff changes.diff
-diffscope review --model claude-3-haiku-20240307 --diff changes.diff
+export ANTHROPIC_API_KEY=your-key  
+git diff | diffscope review --model claude-3-5-sonnet-20241022
 
 # Local Ollama
-diffscope review --model ollama:codellama --diff changes.diff
-diffscope review --model ollama:llama3.2 --diff changes.diff
+git diff | diffscope review --model ollama:codellama
 ```
 
 ### Supported Models
@@ -111,22 +111,22 @@ diffscope review --model ollama:llama3.2 --diff changes.diff
 
 **Ollama**: Any locally installed model (codellama, llama3.2, mistral, etc.)
 
-### Output formats
+### Output Formats
 ```bash
-# JSON (default)
-diffscope review --diff changes.diff --output-format json
+# JSON output (default)
+git diff | diffscope review --output-format json
 
-# Markdown
-diffscope review --diff changes.diff --output-format markdown > review.md
+# Markdown report  
+git diff | diffscope review --output-format markdown > review.md
 
-# Patch comments
-diffscope review --diff changes.diff --output-format patch
+# Inline patch comments
+git diff | diffscope review --output-format patch
 ```
 
 ## GitHub Action
 
 ```yaml
-name: Code Review
+name: AI Code Review
 on: [pull_request]
 
 jobs:
@@ -138,6 +138,7 @@ jobs:
         with:
           model: gpt-4o
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          post-comments: true
 ```
 
 ## Configuration
@@ -148,12 +149,7 @@ Create a `.diffscope.yml` file in your repository:
 model: gpt-4o
 temperature: 0.2
 max_tokens: 4000
-system_prompt: |
-  You are an expert code reviewer. Focus on:
-  - Security vulnerabilities
-  - Performance issues
-  - Best practices
-  - Code clarity
+system_prompt: "Focus on security vulnerabilities, performance issues, and best practices"
 ```
 
 ## Plugin Development
@@ -194,12 +190,17 @@ Apache-2.0 License. See [LICENSE](LICENSE) for details.
 ## Example Output
 
 ### Standard Review
-```
-Line 32: Security - Logging raw input data may expose sensitive information. 
-Risk of data leakage. Remove or sanitize before logging.
-
-Line 14: Bug - TODO indicates missing error handling. Could cause crashes. 
-Implement proper error handling.
+```json
+[
+  {
+    "file_path": "src/auth.py",
+    "line_number": 42,
+    "content": "Potential SQL injection vulnerability",
+    "severity": "Error",
+    "category": "Security",
+    "suggestion": "Use parameterized queries instead of string interpolation"
+  }
+]
 ```
 
 ### Smart Review Output
@@ -208,37 +209,45 @@ Implement proper error handling.
 
 ## 📊 Executive Summary
 
-🟡 **Code Quality Score:** 7.2/10
-📝 **Total Issues Found:** 3
+🟡 **Code Quality Score:** 8.2/10
+📝 **Total Issues Found:** 4
 🚨 **Critical Issues:** 1
-📁 **Files Analyzed:** 2
-
-### 📈 Issue Breakdown
-| Severity | Count | Category | Count |
-|----------|-------|----------|-------|
-| Error | 1 | Security | 1 |
-| Warning | 2 | Performance | 1 |
+📁 **Files Analyzed:** 3
 
 ### 🎯 Priority Actions
 1. Address 1 security issue(s) immediately
-2. Consider a performance audit - multiple optimization opportunities found
+2. Consider performance optimization for database queries
+
+---
+
+## 🔍 Detailed Analysis
 
 ### 🔴 Critical Issues (Fix Immediately)
 
-#### 🔒 **auth.py:42** - 🔴 Significant Effort Security
+#### 🔒 **src/auth.py:42** - 🔴 Significant Effort Security
 **Confidence:** 95% | **Tags:** `security`, `sql`, `injection`
 
-SQL injection vulnerability in user authentication. The query directly interpolates user input without parameterization.
+SQL injection vulnerability detected. User input is directly interpolated into query string without proper sanitization.
 
 **💡 Recommended Fix:**
-Use parameterized queries: `query = "SELECT * FROM users WHERE username=%s AND password=%s"`
+Use parameterized queries to prevent SQL injection attacks.
 
 **🔧 Code Example:**
 ```diff
-- query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
-+ query = "SELECT * FROM users WHERE username=%s AND password=%s"
-+ cursor.execute(query, (username, password))
+- query = f"SELECT * FROM users WHERE username='{username}'"
++ query = "SELECT * FROM users WHERE username=%s"
++ cursor.execute(query, (username,))
 ```
+
+### 🟡 High Priority Issues
+
+#### ⚡ **src/models.py:28** - 🟡 Moderate Effort Performance
+**Confidence:** 87% | **Tags:** `performance`, `n+1-query`
+
+N+1 query problem detected in user retrieval loop.
+
+**💡 Recommended Fix:**
+Use eager loading or bulk queries to reduce database calls.
 ```
 
 ### Commit Message Suggestion
