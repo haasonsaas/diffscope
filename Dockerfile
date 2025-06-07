@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.75-alpine AS builder
+FROM rust:1.80-alpine AS builder
 
 RUN apk add --no-cache musl-dev
 
