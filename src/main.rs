@@ -70,6 +70,7 @@ enum GitCommands {
         base: String,
     },
     Suggest,
+    PrTitle,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -200,6 +201,9 @@ async fn git_command(command: GitCommands, model: String, format: OutputFormat) 
         GitCommands::Suggest => {
             return suggest_commit_message(model).await;
         }
+        GitCommands::PrTitle => {
+            return suggest_pr_title(model).await;
+        }
     };
     
     if diff_content.is_empty() {
@@ -212,7 +216,7 @@ async fn git_command(command: GitCommands, model: String, format: OutputFormat) 
 
 async fn pr_command(
     number: Option<u32>,
-    repo: Option<String>,
+    _repo: Option<String>,
     post_comments: bool,
     model: String,
     format: OutputFormat,
@@ -308,6 +312,60 @@ async fn suggest_commit_message(model: String) -> Result<()> {
     Ok(())
 }
 
+async fn suggest_pr_title(model: String) -> Result<()> {
+    let git = core::GitIntegration::new(".")?;
+    let diff_content = git.get_branch_diff("main")?;
+    
+    if diff_content.is_empty() {
+        println!("No changes found compared to main branch.");
+        return Ok(());
+    }
+    
+    let model_config = adapters::llm::ModelConfig {
+        model_name: model,
+        ..Default::default()
+    };
+    
+    let adapter = adapters::llm::create_adapter(&model_config)?;
+    
+    let (system_prompt, user_prompt) = core::CommitPromptBuilder::build_pr_title_prompt(&diff_content);
+    
+    let request = adapters::llm::LLMRequest {
+        system_prompt,
+        user_prompt,
+        temperature: Some(0.3),
+        max_tokens: Some(200),
+    };
+    
+    let response = adapter.complete(request).await?;
+    
+    // Extract title from response
+    let title = if let Some(start) = response.content.find("<title>") {
+        if let Some(end) = response.content.find("</title>") {
+            response.content[start + 7..end].trim().to_string()
+        } else {
+            response.content.trim().to_string()
+        }
+    } else {
+        // Fallback: take the first non-empty line
+        response.content
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    
+    println!("\nSuggested PR title:");
+    println!("{}", title);
+    
+    if title.len() > 65 {
+        println!("\n⚠️  Warning: PR title exceeds 65 characters ({})", title.len());
+    }
+    
+    Ok(())
+}
+
 async fn review_diff_content(
     diff_content: &str,
     model: String,
@@ -324,6 +382,10 @@ async fn review_diff_content_raw(
     let diffs = core::DiffParser::parse_unified_diff(diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
     
+    // Initialize plugin manager and load builtin plugins
+    let mut plugin_manager = plugins::plugin::PluginManager::new();
+    plugin_manager.load_builtin_plugins().await?;
+    
     let model_config = adapters::llm::ModelConfig {
         model_name: model,
         ..Default::default()
@@ -335,12 +397,16 @@ async fn review_diff_content_raw(
     
     for diff in diffs {
         let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
-        let context_chunks = context_fetcher.fetch_context_for_file(
+        let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
             &diff.hunks.iter()
                 .map(|h| (h.new_start, h.new_start + h.new_lines))
                 .collect::<Vec<_>>()
         ).await?;
+        
+        // Run pre-analyzers to get additional context
+        let analyzer_chunks = plugin_manager.run_pre_analyzers(&diff, ".").await?;
+        context_chunks.extend(analyzer_chunks);
         
         let (system_prompt, user_prompt) = prompt_builder.build_prompt(&diff, &context_chunks)?;
         
@@ -359,7 +425,10 @@ async fn review_diff_content_raw(
         }
     }
     
-    Ok(all_comments)
+    // Run post-processors to filter and refine comments
+    let processed_comments = plugin_manager.run_post_processors(all_comments, ".").await?;
+    
+    Ok(processed_comments)
 }
 
 fn parse_llm_response(content: &str, file_path: &PathBuf) -> Result<Vec<core::comment::RawComment>> {

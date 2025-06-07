@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig};
+use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 
 pub struct OllamaAdapter {
     client: Client,
@@ -82,7 +82,15 @@ impl LLMAdapter for OllamaAdapter {
         Ok(LLMResponse {
             content: ollama_response.response,
             model: ollama_response.model,
-            usage: None,
+            usage: if ollama_response.done {
+                Some(Usage {
+                    prompt_tokens: ollama_response.prompt_eval_count.unwrap_or(0),
+                    completion_tokens: ollama_response.eval_count.unwrap_or(0),
+                    total_tokens: ollama_response.prompt_eval_count.unwrap_or(0) + ollama_response.eval_count.unwrap_or(0),
+                })
+            } else {
+                None
+            },
         })
     }
     

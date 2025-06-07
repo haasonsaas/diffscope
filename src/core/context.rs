@@ -55,7 +55,47 @@ impl ContextFetcher {
     }
 
     pub async fn fetch_related_definitions(&self, file_path: &PathBuf, symbols: &[String]) -> Result<Vec<LLMContextChunk>> {
-        let chunks = Vec::new();
+        let mut chunks = Vec::new();
+        
+        if symbols.is_empty() {
+            return Ok(chunks);
+        }
+        
+        // Search for symbol definitions in the same file first
+        let full_path = self.repo_path.join(file_path);
+        if full_path.exists() {
+            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+                let lines: Vec<&str> = content.lines().collect();
+                
+                for symbol in symbols {
+                    // Look for function/class/interface definitions
+                    for (line_num, line) in lines.iter().enumerate() {
+                        let trimmed = line.trim();
+                        if trimmed.contains(&format!("function {}", symbol)) ||
+                           trimmed.contains(&format!("class {}", symbol)) ||
+                           trimmed.contains(&format!("interface {}", symbol)) ||
+                           trimmed.contains(&format!("fn {}", symbol)) ||
+                           trimmed.contains(&format!("struct {}", symbol)) ||
+                           trimmed.contains(&format!("enum {}", symbol)) ||
+                           trimmed.contains(&format!("impl {}", symbol)) {
+                            
+                            // Extract a few lines around the definition for context
+                            let start_line = line_num.saturating_sub(2);
+                            let end_line = (line_num + 5).min(lines.len());
+                            let definition_content = lines[start_line..end_line].join("\n");
+                            
+                            chunks.push(LLMContextChunk {
+                                file_path: file_path.clone(),
+                                content: definition_content,
+                                context_type: ContextType::Definition,
+                                line_range: Some((start_line + 1, end_line)),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
         Ok(chunks)
     }
 }

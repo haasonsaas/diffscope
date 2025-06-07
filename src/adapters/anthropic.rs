@@ -106,7 +106,14 @@ impl LLMAdapter for AnthropicAdapter {
         
         let content = anthropic_response.content
             .first()
-            .map(|c| c.text.clone())
+            .map(|c| {
+                // Verify it's a text content type
+                if c.content_type == "text" {
+                    c.text.clone()
+                } else {
+                    format!("Unsupported content type: {}", c.content_type)
+                }
+            })
             .unwrap_or_default();
         
         Ok(LLMResponse {

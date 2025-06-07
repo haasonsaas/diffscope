@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use git2::{Repository, DiffOptions, DiffFormat};
-use std::path::{Path, PathBuf};
-use crate::core::UnifiedDiff;
+use std::path::Path;
 
 pub struct GitIntegration {
     repo: Repository,

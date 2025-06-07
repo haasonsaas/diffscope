@@ -5,7 +5,7 @@ pub mod comment;
 pub mod git;
 pub mod commit_prompt;
 
-pub use diff_parser::{DiffParser, UnifiedDiff, DiffHunk};
+pub use diff_parser::{DiffParser, UnifiedDiff};
 pub use context::{ContextFetcher, LLMContextChunk, ContextType};
 pub use prompt::PromptBuilder;
 pub use comment::{Comment, CommentSynthesizer};
