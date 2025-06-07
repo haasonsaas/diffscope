@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2025-06-06
+
+### Fixed
+- Add Cargo.lock to repository for reproducible builds
+- Fix Docker build error about missing Cargo.lock
+
 ## [0.5.2] - 2025-06-06
 
 ### Fixed
