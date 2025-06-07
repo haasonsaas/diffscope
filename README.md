@@ -6,7 +6,7 @@ A composable code review engine for automated diff analysis.
 
 - **Model Agnostic**: Works with OpenAI, Anthropic Claude 4, Ollama, and any OpenAI-compatible API
 - **Git Integration**: Review uncommitted, staged, or branch changes directly
-- **PR Reviews**: Analyze and comment on GitHub pull requests
+- **PR Reviews**: Analyze and comment on GitHub pull requests with interactive commands
 - **Smart Prompting**: Advanced prompt engineering with examples, XML structure, and chain-of-thought
 - **Commit Messages**: AI-powered commit message suggestions following conventional commits
 - **Composable Architecture**: Modular components that work together
@@ -14,6 +14,9 @@ A composable code review engine for automated diff analysis.
 - **Multiple Outputs**: JSON, patch, or markdown formats
 - **CI/CD Ready**: GitHub Action, GitLab CI, and Docker support
 - **Smart Review**: Enhanced analysis with confidence scoring, fix effort estimation, and executive summaries
+- **Path-Based Configuration**: Customize review behavior for different parts of your codebase
+- **Changelog Generation**: Generate changelogs and release notes from git history
+- **Interactive Commands**: Respond to PR comments with @diffscope commands
 
 ## Quick Start
 
@@ -429,6 +432,104 @@ stage('AI Code Review') {
 4. **Custom Prompts**: Tailor system prompts to your tech stack and standards
 5. **Output Parsing**: Handle both empty reviews and JSON parsing errors gracefully
 6. **Conditional Runs**: Skip reviews on draft PRs or specific file types
+
+## New Features in v0.5.0
+
+### 🔄 Changelog Generation
+
+Generate professional changelogs and release notes from your git history:
+
+```bash
+# Generate changelog from a specific tag to HEAD
+diffscope changelog --from v0.4.0 --to HEAD
+
+# Generate release notes for a new version
+diffscope changelog --release v0.5.0 --from v0.4.0
+
+# Output to file
+diffscope changelog --from v0.4.0 --output CHANGELOG.md
+```
+
+The changelog generator:
+- Parses conventional commits automatically
+- Groups changes by type (features, fixes, etc.)
+- Highlights breaking changes
+- Shows contributor statistics
+- Generates both changelogs and release notes formats
+
+### 🎯 Path-Based Configuration
+
+Customize review behavior for different parts of your codebase:
+
+**.diffscope.yml**
+```yaml
+# Global configuration
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4000
+
+# Exclude patterns
+exclude_patterns:
+  - "**/*.generated.*"
+  - "**/node_modules/**"
+
+# Path-specific rules
+paths:
+  # API endpoints need security focus
+  "src/api/**":
+    focus:
+      - security
+      - validation
+      - authentication
+    severity_overrides:
+      security: error  # All security issues become errors
+    system_prompt: |
+      Focus on SQL injection, auth bypass, and input validation
+
+  # Test files have different standards
+  "tests/**":
+    focus:
+      - coverage
+      - assertions
+    severity_overrides:
+      style: suggestion  # Style issues are just suggestions
+
+  # Database migrations are critical
+  "migrations/**":
+    severity_overrides:
+      bug: error  # Any bug in migrations is critical
+```
+
+### 💬 Interactive PR Commands
+
+Respond to pull request comments with interactive commands:
+
+```
+@diffscope review                 # Re-review the changes
+@diffscope review security        # Focus review on security
+@diffscope ignore src/generated/  # Ignore specific paths
+@diffscope explain line 42        # Explain specific code
+@diffscope generate tests         # Generate unit tests
+@diffscope help                   # Show all commands
+```
+
+### 📊 PR Summary Generation
+
+Generate executive summaries for pull requests:
+
+```bash
+# Generate PR summary with statistics
+diffscope pr --summary
+
+# Generate and post to GitHub
+diffscope pr --number 123 --summary --post-comments
+```
+
+The summary includes:
+- Change statistics and impact analysis
+- Key modifications by category
+- Risk assessment
+- Review recommendations
 
 ## Contributing
 

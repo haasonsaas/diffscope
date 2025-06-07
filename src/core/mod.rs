@@ -5,6 +5,9 @@ pub mod comment;
 pub mod git;
 pub mod commit_prompt;
 pub mod smart_review_prompt;
+pub mod pr_summary;
+pub mod interactive;
+pub mod changelog;
 
 pub use diff_parser::{DiffParser, UnifiedDiff};
 pub use context::{ContextFetcher, LLMContextChunk, ContextType};
@@ -13,3 +16,6 @@ pub use comment::{Comment, CommentSynthesizer};
 pub use git::GitIntegration;
 pub use commit_prompt::CommitPromptBuilder;
 pub use smart_review_prompt::SmartReviewPromptBuilder;
+pub use pr_summary::{PRSummaryGenerator, PRSummary};
+pub use interactive::{InteractiveCommand, InteractiveProcessor};
+pub use changelog::ChangelogGenerator;

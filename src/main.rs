@@ -65,6 +65,9 @@ enum Commands {
         
         #[arg(long)]
         post_comments: bool,
+        
+        #[arg(long)]
+        summary: bool,
     },
     Compare {
         #[arg(long)]
@@ -77,6 +80,20 @@ enum Commands {
     SmartReview {
         #[arg(long, help = "Path to diff file (reads from stdin if not provided)")]
         diff: Option<PathBuf>,
+        
+        #[arg(short, long, help = "Output file path (prints to stdout if not provided)")]
+        output: Option<PathBuf>,
+    },
+    #[command(about = "Generate changelog and release notes from git history")]
+    Changelog {
+        #[arg(long, help = "Starting tag/commit (defaults to most recent tag)")]
+        from: Option<String>,
+        
+        #[arg(long, help = "Ending ref (defaults to HEAD)")]
+        to: Option<String>,
+        
+        #[arg(long, help = "Generate release notes for a specific version")]
+        release: Option<String>,
         
         #[arg(short, long, help = "Output file path (prints to stdout if not provided)")]
         output: Option<PathBuf>,
@@ -138,14 +155,17 @@ async fn main() -> Result<()> {
         Commands::Git { command } => {
             git_command(command, config, cli.output_format).await?;
         }
-        Commands::Pr { number, repo, post_comments } => {
-            pr_command(number, repo, post_comments, config, cli.output_format).await?;
+        Commands::Pr { number, repo, post_comments, summary } => {
+            pr_command(number, repo, post_comments, summary, config, cli.output_format).await?;
         }
         Commands::Compare { old_file, new_file } => {
             compare_command(old_file, new_file, config, cli.output_format).await?;
         }
         Commands::SmartReview { diff, output } => {
             smart_review_command(config, diff, output).await?;
+        }
+        Commands::Changelog { from, to, release, output } => {
+            changelog_command(from, to, release, output).await?;
         }
     }
     
@@ -182,23 +202,51 @@ async fn review_command(
     };
     
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let mut prompt_config = core::prompt::PromptConfig::default();
-    if let Some(custom_prompt) = &config.system_prompt {
-        prompt_config.system_prompt = custom_prompt.clone();
-    }
-    let prompt_builder = core::PromptBuilder::new(prompt_config);
+    let base_prompt_config = core::prompt::PromptConfig::default();
     let mut all_comments = Vec::new();
     
     for diff in diffs {
+        // Check if file should be excluded
+        if config.should_exclude(&diff.file_path) {
+            info!("Skipping excluded file: {}", diff.file_path.display());
+            continue;
+        }
+        
         let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
-        let context_chunks = context_fetcher.fetch_context_for_file(
+        let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
             &diff.hunks.iter()
                 .map(|h| (h.new_start, h.new_start + h.new_lines))
                 .collect::<Vec<_>>()
         ).await?;
         
-        let (system_prompt, user_prompt) = prompt_builder.build_prompt(&diff, &context_chunks)?;
+        // Get path-specific configuration
+        let path_config = config.get_path_config(&diff.file_path);
+        
+        // Apply path-specific system prompt if available
+        let mut local_prompt_config = base_prompt_config.clone();
+        if let Some(custom_prompt) = &config.system_prompt {
+            local_prompt_config.system_prompt = custom_prompt.clone();
+        }
+        if let Some(pc) = path_config {
+            if let Some(ref prompt) = pc.system_prompt {
+                local_prompt_config.system_prompt = prompt.clone();
+            }
+            
+            // Add focus areas to context
+            if !pc.focus.is_empty() {
+                let focus_chunk = core::LLMContextChunk {
+                    content: format!("Focus areas for this file: {}", pc.focus.join(", ")),
+                    context_type: core::ContextType::Documentation,
+                    file_path: diff.file_path.clone(),
+                    line_range: None,
+                };
+                context_chunks.push(focus_chunk);
+            }
+        }
+        
+        let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
+        let (system_prompt, user_prompt) = local_prompt_builder.build_prompt(&diff, &context_chunks)?;
         
         let request = adapters::llm::LLMRequest {
             system_prompt,
@@ -210,7 +258,25 @@ async fn review_command(
         let response = adapter.complete(request).await?;
         
         if let Ok(raw_comments) = parse_llm_response(&response.content, &diff.file_path) {
-            let comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+            let mut comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+            
+            // Apply severity overrides if configured
+            if let Some(pc) = path_config {
+                for comment in &mut comments {
+                    for (category, severity) in &pc.severity_overrides {
+                        if format!("{:?}", comment.category).to_lowercase() == category.to_lowercase() {
+                            comment.severity = match severity.to_lowercase().as_str() {
+                                "error" => core::comment::Severity::Error,
+                                "warning" => core::comment::Severity::Warning,
+                                "info" => core::comment::Severity::Info,
+                                "suggestion" => core::comment::Severity::Suggestion,
+                                _ => comment.severity.clone(),
+                            };
+                        }
+                    }
+                }
+            }
+            
             all_comments.extend(comments);
         }
     }
@@ -265,6 +331,7 @@ async fn pr_command(
     number: Option<u32>,
     _repo: Option<String>,
     post_comments: bool,
+    summary: bool,
     config: config::Config,
     format: OutputFormat,
 ) -> Result<()> {
@@ -300,6 +367,26 @@ async fn pr_command(
     
     if diff_content.is_empty() {
         println!("No changes in PR");
+        return Ok(());
+    }
+    
+    // Generate PR summary if requested
+    if summary {
+        let diffs = core::DiffParser::parse_unified_diff(&diff_content)?;
+        let git = core::GitIntegration::new(".")?;
+        
+        let model_config = adapters::llm::ModelConfig {
+            model_name: config.model.clone(),
+            api_key: config.api_key.clone(),
+            base_url: config.base_url.clone(),
+            temperature: config.temperature,
+            max_tokens: config.max_tokens,
+        };
+        
+        let adapter = adapters::llm::create_adapter(&model_config)?;
+        let pr_summary = core::PRSummaryGenerator::generate_summary(&diffs, &git, &adapter).await?;
+        
+        println!("{}", pr_summary.to_markdown());
         return Ok(());
     }
     
@@ -505,11 +592,7 @@ async fn review_diff_content_raw(
     };
     
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let mut prompt_config = core::prompt::PromptConfig::default();
-    if let Some(custom_prompt) = &config.system_prompt {
-        prompt_config.system_prompt = custom_prompt.clone();
-    }
-    let prompt_builder = core::PromptBuilder::new(prompt_config);
+    let base_prompt_config = core::prompt::PromptConfig::default();
     let mut all_comments = Vec::new();
     
     for diff in diffs {
@@ -532,7 +615,13 @@ async fn review_diff_content_raw(
             context_chunks.extend(definition_chunks);
         }
         
-        let (system_prompt, user_prompt) = prompt_builder.build_prompt(&diff, &context_chunks)?;
+        // Create prompt builder with config
+        let mut local_prompt_config = base_prompt_config.clone();
+        if let Some(custom_prompt) = &config.system_prompt {
+            local_prompt_config.system_prompt = custom_prompt.clone();
+        }
+        let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
+        let (system_prompt, user_prompt) = local_prompt_builder.build_prompt(&diff, &context_chunks)?;
         
         let request = adapters::llm::LLMRequest {
             system_prompt,
@@ -788,6 +877,12 @@ async fn smart_review_command(
     let mut all_comments = Vec::new();
     
     for diff in diffs {
+        // Check if file should be excluded
+        if config.should_exclude(&diff.file_path) {
+            info!("Skipping excluded file: {}", diff.file_path.display());
+            continue;
+        }
+        
         let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
         let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
@@ -795,6 +890,22 @@ async fn smart_review_command(
                 .map(|h| (h.new_start, h.new_start + h.new_lines))
                 .collect::<Vec<_>>()
         ).await?;
+        
+        // Get path-specific configuration
+        let path_config = config.get_path_config(&diff.file_path);
+        
+        // Add focus areas to context if configured
+        if let Some(pc) = path_config {
+            if !pc.focus.is_empty() {
+                let focus_chunk = core::LLMContextChunk {
+                    content: format!("Focus areas for this file: {}", pc.focus.join(", ")),
+                    context_type: core::ContextType::Documentation,
+                    file_path: diff.file_path.clone(),
+                    line_range: None,
+                };
+                context_chunks.push(focus_chunk);
+            }
+        }
         
         // Extract symbols and get definitions
         let symbols = extract_symbols_from_diff(&diff);
@@ -815,7 +926,25 @@ async fn smart_review_command(
         let response = adapter.complete(request).await?;
         
         if let Ok(raw_comments) = parse_smart_review_response(&response.content, &diff.file_path) {
-            let comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+            let mut comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+            
+            // Apply severity overrides if configured
+            if let Some(pc) = path_config {
+                for comment in &mut comments {
+                    for (category, severity) in &pc.severity_overrides {
+                        if format!("{:?}", comment.category).to_lowercase() == category.to_lowercase() {
+                            comment.severity = match severity.to_lowercase().as_str() {
+                                "error" => core::comment::Severity::Error,
+                                "warning" => core::comment::Severity::Warning,
+                                "info" => core::comment::Severity::Info,
+                                "suggestion" => core::comment::Severity::Suggestion,
+                                _ => comment.severity.clone(),
+                            };
+                        }
+                    }
+                }
+            }
+            
             all_comments.extend(comments);
         }
     }
@@ -1037,6 +1166,37 @@ fn format_detailed_comment(comment: &core::Comment) -> String {
     
     output.push_str("---\n\n");
     output
+}
+
+async fn changelog_command(
+    from: Option<String>,
+    to: Option<String>,
+    release: Option<String>,
+    output_path: Option<PathBuf>,
+) -> Result<()> {
+    info!("Generating changelog/release notes");
+    
+    let generator = core::ChangelogGenerator::new(".")?;
+    
+    let output = if let Some(version) = release {
+        // Generate release notes
+        info!("Generating release notes for version {}", version);
+        generator.generate_release_notes(&version, from.as_deref())?
+    } else {
+        // Generate changelog
+        let to_ref = to.as_deref().unwrap_or("HEAD");
+        info!("Generating changelog from {:?} to {}", from, to_ref);
+        generator.generate_changelog(from.as_deref(), to_ref)?
+    };
+    
+    if let Some(path) = output_path {
+        tokio::fs::write(path, output).await?;
+        info!("Changelog written to file");
+    } else {
+        println!("{}", output);
+    }
+    
+    Ok(())
 }
 
 fn extract_symbols_from_diff(diff: &core::UnifiedDiff) -> Vec<String> {

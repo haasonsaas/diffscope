@@ -1,0 +1,88 @@
+# DiffScope Configuration Example
+# Rename this file to .diffscope.yml to use
+
+# Model configuration
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4000
+
+# API configuration (optional - can use environment variables)
+# api_key: your-api-key-here
+# base_url: https://api.openai.com/v1
+
+# Global exclude patterns
+exclude_patterns:
+  - "**/*.generated.*"
+  - "**/node_modules/**"
+  - "**/target/**"
+  - "**/.git/**"
+  - "**/dist/**"
+  - "**/build/**"
+
+# Path-specific configurations
+paths:
+  # API endpoints need extra security focus
+  "src/api/**":
+    focus:
+      - security
+      - validation
+      - authentication
+    severity_overrides:
+      security: error  # Elevate all security issues to errors
+    system_prompt: |
+      Pay special attention to:
+      - SQL injection vulnerabilities
+      - Authentication bypass risks
+      - Input validation gaps
+      - Rate limiting implementation
+
+  # Test files have different requirements
+  "tests/**":
+    focus:
+      - coverage
+      - assertions
+      - test_quality
+    severity_overrides:
+      style: suggestion  # Downgrade style issues in tests
+    ignore_patterns:
+      - "*.snapshot"
+      - "*.fixture"
+
+  # Frontend components
+  "src/components/**":
+    focus:
+      - accessibility
+      - performance
+      - react_best_practices
+    extra_context:
+      - "src/styles/theme.ts"  # Always include theme context
+
+  # Database migrations are critical
+  "migrations/**":
+    focus:
+      - data_integrity
+      - rollback_safety
+      - performance
+    severity_overrides:
+      bug: error  # All bugs in migrations are critical
+    system_prompt: |
+      Database migrations are critical. Check for:
+      - Data loss risks
+      - Rollback capability
+      - Index performance impact
+      - Lock duration concerns
+
+  # Documentation files
+  "docs/**":
+    focus:
+      - clarity
+      - completeness
+      - examples
+    severity_overrides:
+      bug: info  # Bugs in docs are less critical
+
+# Plugin configuration
+plugins:
+  eslint: true
+  semgrep: true
+  duplicate_filter: true

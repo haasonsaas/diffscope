@@ -89,4 +89,23 @@ impl GitIntegration {
         let remote = self.repo.find_remote("origin")?;
         Ok(remote.url().map(|s| s.to_string()))
     }
+    
+    pub fn get_recent_commits(&self, count: usize) -> Result<Vec<String>> {
+        let mut revwalk = self.repo.revwalk()?;
+        revwalk.push_head()?;
+        
+        let mut commits = Vec::new();
+        for (i, oid) in revwalk.enumerate() {
+            if i >= count {
+                break;
+            }
+            
+            let oid = oid?;
+            let commit = self.repo.find_commit(oid)?;
+            let summary = commit.summary().unwrap_or("No commit message");
+            commits.push(summary.to_string());
+        }
+        
+        Ok(commits)
+    }
 }

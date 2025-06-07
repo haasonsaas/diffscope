@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -19,6 +20,29 @@ pub struct Config {
     
     #[serde(default)]
     pub plugins: PluginConfig,
+    
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
+    
+    #[serde(default)]
+    pub paths: HashMap<String, PathConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathConfig {
+    #[serde(default)]
+    pub focus: Vec<String>,
+    
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
+    
+    #[serde(default)]
+    pub extra_context: Vec<String>,
+    
+    pub system_prompt: Option<String>,
+    
+    #[serde(default)]
+    pub severity_overrides: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -33,6 +57,18 @@ pub struct PluginConfig {
     pub duplicate_filter: bool,
 }
 
+impl Default for PathConfig {
+    fn default() -> Self {
+        Self {
+            focus: Vec::new(),
+            ignore_patterns: Vec::new(),
+            extra_context: Vec::new(),
+            system_prompt: None,
+            severity_overrides: HashMap::new(),
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -43,6 +79,8 @@ impl Default for Config {
             api_key: None,
             base_url: None,
             plugins: PluginConfig::default(),
+            exclude_patterns: Vec::new(),
+            paths: HashMap::new(),
         }
     }
 }
@@ -85,6 +123,60 @@ impl Config {
         }
         if let Some(prompt) = cli_prompt {
             self.system_prompt = Some(prompt);
+        }
+    }
+    
+    pub fn get_path_config(&self, file_path: &PathBuf) -> Option<&PathConfig> {
+        let file_path_str = file_path.to_string_lossy();
+        
+        // Find the most specific matching path
+        let mut best_match: Option<(&String, &PathConfig)> = None;
+        
+        for (pattern, config) in &self.paths {
+            if self.path_matches(&file_path_str, pattern) {
+                // Keep the most specific match (longest pattern)
+                if best_match.is_none() || pattern.len() > best_match.unwrap().0.len() {
+                    best_match = Some((pattern, config));
+                }
+            }
+        }
+        
+        best_match.map(|(_, config)| config)
+    }
+    
+    pub fn should_exclude(&self, file_path: &PathBuf) -> bool {
+        let file_path_str = file_path.to_string_lossy();
+        
+        // Check global exclude patterns
+        for pattern in &self.exclude_patterns {
+            if self.path_matches(&file_path_str, pattern) {
+                return true;
+            }
+        }
+        
+        // Check path-specific ignore patterns
+        if let Some(path_config) = self.get_path_config(file_path) {
+            for pattern in &path_config.ignore_patterns {
+                if self.path_matches(&file_path_str, pattern) {
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
+    
+    fn path_matches(&self, path: &str, pattern: &str) -> bool {
+        // Simple glob matching
+        if pattern.contains('*') {
+            if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+                glob_pattern.matches(path)
+            } else {
+                false
+            }
+        } else {
+            // Direct path prefix matching
+            path.starts_with(pattern)
         }
     }
 }
