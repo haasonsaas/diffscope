@@ -259,6 +259,177 @@ feat(auth): add JWT-based authentication system
 
 Jonathan Haas <jonathan@haas.holdings>
 
+## Advanced CI/CD Integration
+
+### Enterprise GitHub Actions Workflow
+
+Here's an example of how large organizations use diffscope in production CI/CD pipelines:
+
+```yaml
+name: AI Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+
+jobs:
+  ai-code-review:
+    name: AI Code Review with DiffScope
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install DiffScope with Cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-diffscope-${{ hashFiles('**/Cargo.lock') }}
+      
+      - run: |
+          if ! command -v diffscope &> /dev/null; then
+            cargo install diffscope
+          fi
+
+      - name: Generate PR Diff
+        run: |
+          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD > pr.diff
+
+      - name: Run AI Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          diffscope review --model claude-3-5-sonnet-20241022 \
+            --diff pr.diff --output-format json > review.json
+
+      - name: Post Review Comments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = JSON.parse(fs.readFileSync('review.json', 'utf8'));
+            
+            let body = '## 🤖 AI Code Review\n\n';
+            if (review.length === 0) {
+              body += '✅ **No issues found!** Code looks good!';
+            } else {
+              body += review.map((item, i) => 
+                `**${i+1}.** \`${item.file_path}:${item.line_number}\`\n` +
+                `${item.content}\n` +
+                (item.suggestion ? `\n💡 **Suggestion:** ${item.suggestion}\n` : '')
+              ).join('\n---\n');
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+```
+
+### Enterprise Configuration Example
+
+For a large Python/FastAPI application at a company like Acme Inc:
+
+**.diffscope.yml**
+```yaml
+# Acme Inc DiffScope Configuration
+model: "claude-3-5-sonnet-20241022"
+temperature: 0.1  # Low for consistent reviews
+max_tokens: 4000
+
+system_prompt: |
+  You are reviewing Python code for a production FastAPI application.
+  
+  Critical focus areas:
+  - SQL injection and security vulnerabilities
+  - Async/await correctness
+  - Resource leaks and memory issues
+  - API contract consistency
+  - Production deployment concerns
+  
+  Prioritize by severity: Security > Performance > Maintainability
+
+# File filters for monorepo
+include_patterns:
+  - "src/**/*.py"
+  - "tests/**/*.py"
+  - "alembic/versions/*.py"
+  - "*.yml"
+  - "Dockerfile*"
+
+exclude_patterns:
+  - "**/__pycache__/**"
+  - "**/venv/**"
+  - "**/.pytest_cache/**"
+  - "**/node_modules/**"
+
+# Review configuration
+max_diff_size: 10000
+context_lines: 3
+```
+
+### Integration with Other CI Tools
+
+**GitLab CI Example:**
+```yaml
+code-review:
+  stage: review
+  image: rust:alpine
+  only:
+    - merge_requests
+  script:
+    - apk add --no-cache git
+    - cargo install diffscope
+    - git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD > mr.diff
+    - diffscope smart-review --diff mr.diff --output review.md
+  artifacts:
+    reports:
+      codequality: review.md
+```
+
+**Jenkins Pipeline:**
+```groovy
+stage('AI Code Review') {
+  steps {
+    sh '''
+      curl -sSL https://sh.rustup.rs | sh -s -- -y
+      source $HOME/.cargo/env
+      cargo install diffscope
+      
+      git diff origin/${env.CHANGE_TARGET}...HEAD > pr.diff
+      diffscope review --diff pr.diff --output-format json > review.json
+    '''
+    
+    publishHTML([
+      allowMissing: false,
+      alwaysLinkToLastBuild: true,
+      keepAll: true,
+      reportDir: '.',
+      reportFiles: 'review.json',
+      reportName: 'AI Code Review'
+    ])
+  }
+}
+```
+
+### Best Practices for CI/CD Integration
+
+1. **Cache Installation**: Cache cargo/diffscope binaries to speed up CI runs
+2. **API Key Management**: Use secure secret storage for API keys
+3. **Diff Size Limits**: Set max diff size to avoid timeouts on large PRs
+4. **Custom Prompts**: Tailor system prompts to your tech stack and standards
+5. **Output Parsing**: Handle both empty reviews and JSON parsing errors gracefully
+6. **Conditional Runs**: Skip reviews on draft PRs or specific file types
+
 ## Contributing
 
 Contributions are welcome! Please open an issue first to discuss what you would like to change.

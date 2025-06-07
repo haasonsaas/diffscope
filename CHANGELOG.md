@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2025-06-06
+
+### Added
+- **Advanced CI/CD Integration**: Comprehensive enterprise examples section
+- **GitHub Actions**: Full production workflow with caching and comment posting
+- **GitLab CI**: Integration example for GitLab pipelines
+- **Jenkins**: Pipeline script for Jenkins integration
+- **Enterprise Config**: Real-world .diffscope.yml for large Python/FastAPI projects
+- **Best Practices**: CI/CD integration tips and recommendations
+
+### Documentation
+- Added "Advanced CI/CD Integration" section with production examples
+- Enterprise configuration patterns for monorepos
+- Multi-platform CI examples (GitHub, GitLab, Jenkins)
+- Best practices for API key management and caching
+
 ## [0.4.1] - 2025-06-06
 
 ### Changed
