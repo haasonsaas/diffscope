@@ -8,23 +8,55 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    permissions:
+      contents: write
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Extract version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            # DiffScope ${{ steps.get_version.outputs.VERSION }}
+            
+            See [CHANGELOG.md](https://github.com/haasonsaas/diffscope/blob/main/CHANGELOG.md) for details.
+            
+            ## 🚀 Installation
+            
+            ### Quick install (Linux/macOS):
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/haasonsaas/diffscope/main/install.sh | sh
+            ```
+            
+            ### Quick install (Windows):
+            ```powershell
+            iwr -useb https://raw.githubusercontent.com/haasonsaas/diffscope/main/install.ps1 | iex
+            ```
+            
+            ### Manual installation:
+            Download the appropriate binary below for your platform and add it to your PATH.
+            
+            ## 📦 Checksums
+            SHA256 checksums will be available once all builds complete.
           draft: false
           prerelease: false
+          generate_release_notes: true
 
   build-release:
     name: Build Release
@@ -93,15 +125,25 @@ jobs:
         run: |
           strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
       
+      - name: Create checksum (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd target/${{ matrix.target }}/release/
+          sha256sum ${{ matrix.artifact_name }} > ${{ matrix.asset_name }}.sha256
+          
+      - name: Create checksum (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd target/${{ matrix.target }}/release/
+          (Get-FileHash -Algorithm SHA256 ${{ matrix.artifact_name }}).Hash + "  " + "${{ matrix.artifact_name }}" | Out-File -Encoding ASCII ${{ matrix.asset_name }}.sha256
+          
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-          asset_name: ${{ matrix.asset_name }}
-          asset_content_type: application/octet-stream
+          tag_name: ${{ github.ref }}
+          files: |
+            target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.sha256
 
   build-docker:
     name: Build and Push Docker Image
@@ -137,38 +179,5 @@ jobs:
             ghcr.io/haasonsaas/diffscope:latest
             ghcr.io/haasonsaas/diffscope:${{ steps.get_version.outputs.VERSION }}
 
-  update-homebrew:
-    name: Update Homebrew Formula
-    needs: build-release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout tap repository
-        uses: actions/checkout@v4
-        with:
-          repository: haasonsaas/homebrew-diffscope
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      
-      - name: Update formula
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/diffscope.rb
-          
-          # Calculate SHA256 for x86_64 macOS binary
-          DARWIN_X64_URL="https://github.com/haasonsaas/diffscope/releases/download/v${VERSION}/diffscope-x86_64-apple-darwin"
-          DARWIN_X64_SHA=$(curl -sL $DARWIN_X64_URL | shasum -a 256 | cut -d' ' -f1)
-          
-          # Calculate SHA256 for ARM64 macOS binary
-          DARWIN_ARM64_URL="https://github.com/haasonsaas/diffscope/releases/download/v${VERSION}/diffscope-aarch64-apple-darwin"
-          DARWIN_ARM64_SHA=$(curl -sL $DARWIN_ARM64_URL | shasum -a 256 | cut -d' ' -f1)
-          
-          # Update the formula with new checksums
-          # This is a simplified example - you'd need to update the actual formula structure
-          echo "Updated version to $VERSION"
-      
-      - name: Commit and push changes
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add Formula/diffscope.rb
-          git commit -m "Update diffscope to ${GITHUB_REF#refs/tags/}"
-          git push
+  # Homebrew formula update can be added later when tap repository is created
+  # For now, users can use the install script or download binaries directly
