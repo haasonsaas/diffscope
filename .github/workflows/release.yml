@@ -170,10 +170,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd target/${{ matrix.target }}/release/
-          # Upload binary
+          # Copy/rename binary to platform-specific name
           if [ -f "${{ matrix.artifact_name }}" ]; then
-            echo "Uploading ${{ matrix.artifact_name }}..."
-            gh release upload ${{ github.ref_name }} "${{ matrix.artifact_name }}" --clobber || true
+            cp "${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
+            echo "Uploading ${{ matrix.asset_name }}..."
+            gh release upload ${{ github.ref_name }} "${{ matrix.asset_name }}" --clobber || true
           fi
           # Upload checksum
           if [ -f "${{ matrix.asset_name }}.sha256" ]; then
