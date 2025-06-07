@@ -1,6 +1,7 @@
 mod core;
 mod adapters;
 mod plugins;
+mod config;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -20,7 +21,13 @@ struct Cli {
     model: String,
     
     #[arg(long, global = true)]
-    prompt: Option<PathBuf>,
+    prompt: Option<String>,
+    
+    #[arg(long, global = true)]
+    temperature: Option<f32>,
+    
+    #[arg(long, global = true)]
+    max_tokens: Option<usize>,
     
     #[arg(long, global = true, default_value = "json")]
     output_format: OutputFormat,
@@ -59,6 +66,13 @@ enum Commands {
         #[arg(long)]
         post_comments: bool,
     },
+    Compare {
+        #[arg(long)]
+        old_file: PathBuf,
+        
+        #[arg(long)]
+        new_file: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -94,18 +108,33 @@ async fn main() -> Result<()> {
         .with_env_filter(filter)
         .init();
     
+    // Load configuration from file and merge with CLI options
+    let mut config = config::Config::load().unwrap_or_default();
+    config.merge_with_cli(Some(cli.model.clone()), cli.prompt.clone());
+    
+    // Override with CLI temperature and max_tokens if provided
+    if let Some(temp) = cli.temperature {
+        config.temperature = temp;
+    }
+    if let Some(tokens) = cli.max_tokens {
+        config.max_tokens = tokens;
+    }
+    
     match cli.command {
         Commands::Review { diff, patch, output } => {
-            review_command(cli.model, diff, patch, output, cli.output_format).await?;
+            review_command(config, diff, patch, output, cli.output_format).await?;
         }
         Commands::Check { path } => {
-            check_command(path, cli.model).await?;
+            check_command(path, config).await?;
         }
         Commands::Git { command } => {
-            git_command(command, cli.model, cli.output_format).await?;
+            git_command(command, config, cli.output_format).await?;
         }
         Commands::Pr { number, repo, post_comments } => {
-            pr_command(number, repo, post_comments, cli.model, cli.output_format).await?;
+            pr_command(number, repo, post_comments, config, cli.output_format).await?;
+        }
+        Commands::Compare { old_file, new_file } => {
+            compare_command(old_file, new_file, config, cli.output_format).await?;
         }
     }
     
@@ -113,13 +142,13 @@ async fn main() -> Result<()> {
 }
 
 async fn review_command(
-    model: String,
+    config: config::Config,
     diff_path: Option<PathBuf>,
     _patch: bool,
     output_path: Option<PathBuf>,
     format: OutputFormat,
 ) -> Result<()> {
-    info!("Starting diff review with model: {}", model);
+    info!("Starting diff review with model: {}", config.model);
     
     let diff_content = if let Some(path) = diff_path {
         tokio::fs::read_to_string(path).await?
@@ -134,12 +163,19 @@ async fn review_command(
     info!("Parsed {} file diffs", diffs.len());
     
     let model_config = adapters::llm::ModelConfig {
-        model_name: model,
-        ..Default::default()
+        model_name: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config.base_url.clone(),
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
     };
     
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let prompt_builder = core::PromptBuilder::new(core::prompt::PromptConfig::default());
+    let mut prompt_config = core::prompt::PromptConfig::default();
+    if let Some(custom_prompt) = &config.system_prompt {
+        prompt_config.system_prompt = custom_prompt.clone();
+    }
+    let prompt_builder = core::PromptBuilder::new(prompt_config);
     let mut all_comments = Vec::new();
     
     for diff in diffs {
@@ -173,16 +209,16 @@ async fn review_command(
     Ok(())
 }
 
-async fn check_command(path: PathBuf, model: String) -> Result<()> {
+async fn check_command(path: PathBuf, config: config::Config) -> Result<()> {
     info!("Checking repository at: {}", path.display());
-    info!("Using model: {}", model);
+    info!("Using model: {}", config.model);
     
     println!("Repository check not yet implemented");
     
     Ok(())
 }
 
-async fn git_command(command: GitCommands, model: String, format: OutputFormat) -> Result<()> {
+async fn git_command(command: GitCommands, config: config::Config, format: OutputFormat) -> Result<()> {
     let git = core::GitIntegration::new(".")?;
     
     let diff_content = match command {
@@ -199,10 +235,10 @@ async fn git_command(command: GitCommands, model: String, format: OutputFormat) 
             git.get_branch_diff(&base)?
         }
         GitCommands::Suggest => {
-            return suggest_commit_message(model).await;
+            return suggest_commit_message(config).await;
         }
         GitCommands::PrTitle => {
-            return suggest_pr_title(model).await;
+            return suggest_pr_title(config).await;
         }
     };
     
@@ -211,14 +247,14 @@ async fn git_command(command: GitCommands, model: String, format: OutputFormat) 
         return Ok(());
     }
     
-    review_diff_content(&diff_content, model, format).await
+    review_diff_content(&diff_content, config, format).await
 }
 
 async fn pr_command(
     number: Option<u32>,
     _repo: Option<String>,
     post_comments: bool,
-    model: String,
+    config: config::Config,
     format: OutputFormat,
 ) -> Result<()> {
     use std::process::Command;
@@ -235,6 +271,15 @@ async fn pr_command(
     
     info!("Reviewing PR #{}", pr_number);
     
+    // Get additional git context
+    let git = core::GitIntegration::new(".")?;
+    if let Ok(branch) = git.get_current_branch() {
+        info!("Current branch: {}", branch);
+    }
+    if let Ok(Some(remote)) = git.get_remote_url() {
+        info!("Remote URL: {}", remote);
+    }
+    
     // Get PR diff
     let diff_output = Command::new("gh")
         .args(&["pr", "diff", &pr_number])
@@ -247,7 +292,7 @@ async fn pr_command(
         return Ok(());
     }
     
-    let comments = review_diff_content_raw(&diff_content, model.clone()).await?;
+    let comments = review_diff_content_raw(&diff_content, config.clone()).await?;
     
     if post_comments && !comments.is_empty() {
         info!("Posting {} comments to PR", comments.len());
@@ -274,7 +319,7 @@ async fn pr_command(
     Ok(())
 }
 
-async fn suggest_commit_message(model: String) -> Result<()> {
+async fn suggest_commit_message(config: config::Config) -> Result<()> {
     let git = core::GitIntegration::new(".")?;
     let diff_content = git.get_staged_diff()?;
     
@@ -284,8 +329,11 @@ async fn suggest_commit_message(model: String) -> Result<()> {
     }
     
     let model_config = adapters::llm::ModelConfig {
-        model_name: model,
-        ..Default::default()
+        model_name: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config.base_url.clone(),
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
     };
     
     let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -312,7 +360,7 @@ async fn suggest_commit_message(model: String) -> Result<()> {
     Ok(())
 }
 
-async fn suggest_pr_title(model: String) -> Result<()> {
+async fn suggest_pr_title(config: config::Config) -> Result<()> {
     let git = core::GitIntegration::new(".")?;
     let diff_content = git.get_branch_diff("main")?;
     
@@ -322,8 +370,11 @@ async fn suggest_pr_title(model: String) -> Result<()> {
     }
     
     let model_config = adapters::llm::ModelConfig {
-        model_name: model,
-        ..Default::default()
+        model_name: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config.base_url.clone(),
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
     };
     
     let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -366,18 +417,66 @@ async fn suggest_pr_title(model: String) -> Result<()> {
     Ok(())
 }
 
-async fn review_diff_content(
-    diff_content: &str,
-    model: String,
+async fn compare_command(
+    old_file: PathBuf,
+    new_file: PathBuf,
+    config: config::Config,
     format: OutputFormat,
 ) -> Result<()> {
-    let comments = review_diff_content_raw(diff_content, model).await?;
+    info!("Comparing files: {} vs {}", old_file.display(), new_file.display());
+    
+    let old_content = tokio::fs::read_to_string(&old_file).await?;
+    let new_content = tokio::fs::read_to_string(&new_file).await?;
+    
+    // Use the parse_text_diff function to create a UnifiedDiff
+    let diff = core::DiffParser::parse_text_diff(&old_content, &new_content, new_file.clone())?;
+    
+    // Convert the diff to a string format for the review process
+    let diff_string = format!(
+        "--- {}\n+++ {}\n{}",
+        old_file.display(),
+        new_file.display(),
+        format_diff_as_unified(&diff)
+    );
+    
+    review_diff_content(&diff_string, config, format).await
+}
+
+fn format_diff_as_unified(diff: &core::UnifiedDiff) -> String {
+    let mut output = String::new();
+    
+    for hunk in &diff.hunks {
+        output.push_str(&format!(
+            "@@ -{},{} +{},{} @@\n",
+            hunk.old_start, hunk.old_lines,
+            hunk.new_start, hunk.new_lines
+        ));
+        
+        for line in &hunk.changes {
+            let prefix = match line.change_type {
+                core::diff_parser::ChangeType::Added => "+",
+                core::diff_parser::ChangeType::Removed => "-",
+                core::diff_parser::ChangeType::Context => " ",
+            };
+            output.push_str(&format!("{}{}\n", prefix, line.content));
+        }
+    }
+    
+    output
+}
+
+async fn review_diff_content(
+    diff_content: &str,
+    config: config::Config,
+    format: OutputFormat,
+) -> Result<()> {
+    let comments = review_diff_content_raw(diff_content, config).await?;
     output_comments(&comments, None, format).await
 }
 
 async fn review_diff_content_raw(
     diff_content: &str,
-    model: String,
+    config: config::Config,
 ) -> Result<Vec<core::Comment>> {
     let diffs = core::DiffParser::parse_unified_diff(diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
@@ -387,12 +486,19 @@ async fn review_diff_content_raw(
     plugin_manager.load_builtin_plugins().await?;
     
     let model_config = adapters::llm::ModelConfig {
-        model_name: model,
-        ..Default::default()
+        model_name: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config.base_url.clone(),
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
     };
     
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let prompt_builder = core::PromptBuilder::new(core::prompt::PromptConfig::default());
+    let mut prompt_config = core::prompt::PromptConfig::default();
+    if let Some(custom_prompt) = &config.system_prompt {
+        prompt_config.system_prompt = custom_prompt.clone();
+    }
+    let prompt_builder = core::PromptBuilder::new(prompt_config);
     let mut all_comments = Vec::new();
     
     for diff in diffs {
@@ -407,6 +513,13 @@ async fn review_diff_content_raw(
         // Run pre-analyzers to get additional context
         let analyzer_chunks = plugin_manager.run_pre_analyzers(&diff, ".").await?;
         context_chunks.extend(analyzer_chunks);
+        
+        // Extract symbols from diff and fetch their definitions
+        let symbols = extract_symbols_from_diff(&diff);
+        if !symbols.is_empty() {
+            let definition_chunks = context_fetcher.fetch_related_definitions(&diff.file_path, &symbols).await?;
+            context_chunks.extend(definition_chunks);
+        }
         
         let (system_prompt, user_prompt) = prompt_builder.build_prompt(&diff, &context_chunks)?;
         
@@ -534,4 +647,38 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
     }
     
     output
+}
+
+fn extract_symbols_from_diff(diff: &core::UnifiedDiff) -> Vec<String> {
+    let mut symbols = Vec::new();
+    let symbol_regex = regex::Regex::new(r"\b([A-Z][a-zA-Z0-9_]*|[a-z][a-zA-Z0-9_]*)\s*\(").unwrap();
+    
+    for hunk in &diff.hunks {
+        for line in &hunk.changes {
+            if matches!(line.change_type, core::diff_parser::ChangeType::Added | core::diff_parser::ChangeType::Removed) {
+                // Extract function calls and references
+                for capture in symbol_regex.captures_iter(&line.content) {
+                    if let Some(symbol) = capture.get(1) {
+                        let symbol_str = symbol.as_str().to_string();
+                        if symbol_str.len() > 2 && !symbols.contains(&symbol_str) {
+                            symbols.push(symbol_str);
+                        }
+                    }
+                }
+                
+                // Also look for class/struct references
+                let class_regex = regex::Regex::new(r"\b(class|struct|interface|enum)\s+([A-Z][a-zA-Z0-9_]*)").unwrap();
+                for capture in class_regex.captures_iter(&line.content) {
+                    if let Some(class_name) = capture.get(2) {
+                        let class_str = class_name.as_str().to_string();
+                        if !symbols.contains(&class_str) {
+                            symbols.push(class_str);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    symbols
 }

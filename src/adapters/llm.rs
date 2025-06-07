@@ -53,15 +53,29 @@ pub trait LLMAdapter: Send + Sync {
 
 pub fn create_adapter(config: &ModelConfig) -> Result<Box<dyn LLMAdapter>> {
     match config.model_name.as_str() {
+        // Anthropic Claude models (all versions)
+        name if name.starts_with("claude-") => {
+            Ok(Box::new(crate::adapters::AnthropicAdapter::new(config.clone())?))
+        }
+        // Legacy claude naming without dash
         name if name.starts_with("claude") => {
             Ok(Box::new(crate::adapters::AnthropicAdapter::new(config.clone())?))
         }
-        name if name.starts_with("gpt") => {
+        // OpenAI models
+        name if name.starts_with("gpt-") => {
             Ok(Box::new(crate::adapters::OpenAIAdapter::new(config.clone())?))
         }
-        name if name.contains("ollama") || config.base_url.as_ref().map_or(false, |u| u.contains("11434")) => {
+        name if name.starts_with("o1-") => {
+            Ok(Box::new(crate::adapters::OpenAIAdapter::new(config.clone())?))
+        }
+        // Ollama models
+        name if name.starts_with("ollama:") => {
             Ok(Box::new(crate::adapters::OllamaAdapter::new(config.clone())?))
         }
+        _name if config.base_url.as_ref().map_or(false, |u| u.contains("11434")) => {
+            Ok(Box::new(crate::adapters::OllamaAdapter::new(config.clone())?))
+        }
+        // Default to OpenAI for unknown models
         _ => {
             Ok(Box::new(crate::adapters::OpenAIAdapter::new(config.clone())?))
         }

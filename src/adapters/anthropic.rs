@@ -90,6 +90,7 @@ impl LLMAdapter for AnthropicAdapter {
             .post(format!("{}/messages", self.base_url))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "messages-2023-12-15")
             .header("Content-Type", "application/json")
             .json(&anthropic_request)
             .send()
