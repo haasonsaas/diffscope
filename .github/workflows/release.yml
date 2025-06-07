@@ -164,12 +164,39 @@ jobs:
           cd target/${{ matrix.target }}/release/
           (Get-FileHash -Algorithm SHA256 ${{ matrix.artifact_name }}).Hash + "  " + "${{ matrix.artifact_name }}" | Out-File -Encoding ASCII ${{ matrix.asset_name }}.sha256
           
-      - name: Upload Release Asset
+      - name: Upload Release Asset (Unix)
+        if: matrix.os != 'windows-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd target/${{ matrix.target }}/release/
-          gh release upload ${{ github.ref_name }} ${{ matrix.artifact_name }} ${{ matrix.asset_name }}.sha256 --clobber
+          # Upload binary
+          if [ -f "${{ matrix.artifact_name }}" ]; then
+            echo "Uploading ${{ matrix.artifact_name }}..."
+            gh release upload ${{ github.ref_name }} "${{ matrix.artifact_name }}" --clobber || true
+          fi
+          # Upload checksum
+          if [ -f "${{ matrix.asset_name }}.sha256" ]; then
+            echo "Uploading ${{ matrix.asset_name }}.sha256..."
+            gh release upload ${{ github.ref_name }} "${{ matrix.asset_name }}.sha256" --clobber || true
+          fi
+          
+      - name: Upload Release Asset (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd target/${{ matrix.target }}/release/
+          # Upload binary
+          if (Test-Path "${{ matrix.artifact_name }}") {
+            Write-Host "Uploading ${{ matrix.artifact_name }}..."
+            gh release upload ${{ github.ref_name }} "${{ matrix.artifact_name }}" --clobber
+          }
+          # Upload checksum
+          if (Test-Path "${{ matrix.asset_name }}.sha256") {
+            Write-Host "Uploading ${{ matrix.asset_name }}.sha256..."
+            gh release upload ${{ github.ref_name }} "${{ matrix.asset_name }}.sha256" --clobber
+          }
 
   build-docker:
     name: Build and Push Docker Image
