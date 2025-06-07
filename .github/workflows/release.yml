@@ -117,19 +117,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
       
+      - name: Set up macOS cross-compilation
+        if: matrix.os == 'macos-latest' && matrix.target == 'aarch64-apple-darwin'
+        run: |
+          echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
+      
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
       
       - name: Strip binary (Linux and macOS)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && matrix.target != 'aarch64-apple-darwin'
         run: |
           strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+      
+      - name: Strip binary (macOS ARM64)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          # Skip stripping for cross-compiled ARM64 binary or use lipo if needed
+          echo "Skipping strip for cross-compiled ARM64 binary"
       
       - name: Create checksum (Unix)
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release/
-          sha256sum ${{ matrix.artifact_name }} > ${{ matrix.asset_name }}.sha256
+          if [ -f "${{ matrix.artifact_name }}" ]; then
+            sha256sum ${{ matrix.artifact_name }} > ${{ matrix.asset_name }}.sha256
+          else
+            echo "Binary not found, build may have failed"
+            exit 1
+          fi
           
       - name: Create checksum (Windows)
         if: matrix.os == 'windows-latest'
