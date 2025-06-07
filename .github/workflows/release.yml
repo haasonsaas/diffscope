@@ -159,13 +159,11 @@ jobs:
           (Get-FileHash -Algorithm SHA256 ${{ matrix.artifact_name }}).Hash + "  " + "${{ matrix.artifact_name }}" | Out-File -Encoding ASCII ${{ matrix.asset_name }}.sha256
           
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref }}
-          files: |
-            target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.sha256
-          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd target/${{ matrix.target }}/release/
+          gh release upload ${{ github.ref_name }} ${{ matrix.artifact_name }} ${{ matrix.asset_name }}.sha256 --clobber
 
   build-docker:
     name: Build and Push Docker Image
