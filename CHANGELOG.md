@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2025-06-06
+
+### Fixed
+- GitHub Actions release workflow permissions
+- Use modern release action for better reliability
+- Add SHA256 checksums for all release binaries
+- Fix Windows checksum generation in workflow
+
 ## [0.5.1] - 2025-06-06
 
 ### Added
