@@ -25,7 +25,7 @@ pub struct PluginManager {
 impl PluginManager {
     pub fn new() -> Self {
         Self {
-            plugins: HashMap::new(),
+            _plugins: HashMap::new(),
             pre_analyzers: Vec::new(),
             post_processors: Vec::new(),
         }
