@@ -1,12 +1,12 @@
 [package]
 name = "diffscope"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Jonathan Haas <jonathan@haas.holdings>"]
-description = "A composable code review engine for automated diff analysis"
+description = "A composable code review engine with smart analysis, confidence scoring, and professional reporting"
 license = "Apache-2.0"
 repository = "https://github.com/Haasonsaas/diffscope"
-keywords = ["code-review", "diff", "analysis", "cli"]
+keywords = ["code-review", "diff", "analysis", "cli", "security"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]

@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "diffscope")]
-#[command(about = "A composable code review engine for automated diff analysis", long_about = None)]
+#[command(about = "A composable code review engine with smart analysis and professional reporting", long_about = None)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -72,6 +72,14 @@ enum Commands {
         
         #[arg(long)]
         new_file: PathBuf,
+    },
+    #[command(about = "Enhanced code review with confidence scoring and executive summaries")]
+    SmartReview {
+        #[arg(long, help = "Path to diff file (reads from stdin if not provided)")]
+        diff: Option<PathBuf>,
+        
+        #[arg(short, long, help = "Output file path (prints to stdout if not provided)")]
+        output: Option<PathBuf>,
     },
 }
 
@@ -135,6 +143,9 @@ async fn main() -> Result<()> {
         }
         Commands::Compare { old_file, new_file } => {
             compare_command(old_file, new_file, config, cli.output_format).await?;
+        }
+        Commands::SmartReview { diff, output } => {
+            smart_review_command(config, diff, output).await?;
         }
     }
     
@@ -629,23 +640,402 @@ fn format_as_patch(comments: &[core::Comment]) -> String {
 
 fn format_as_markdown(comments: &[core::Comment]) -> String {
     let mut output = String::new();
-    output.push_str("# Code Review Results\n\n");
     
+    // Generate summary
+    let summary = core::CommentSynthesizer::generate_summary(comments);
+    
+    output.push_str("# Code Review Results\n\n");
+    output.push_str(&format!("## Summary\n\n"));
+    output.push_str(&format!("📊 **Overall Score:** {:.1}/10\n", summary.overall_score));
+    output.push_str(&format!("📝 **Total Issues:** {}\n", summary.total_comments));
+    output.push_str(&format!("🚨 **Critical Issues:** {}\n", summary.critical_issues));
+    output.push_str(&format!("📁 **Files Reviewed:** {}\n\n", summary.files_reviewed));
+    
+    // Severity breakdown
+    output.push_str("### Issues by Severity\n\n");
+    for (severity, count) in &summary.by_severity {
+        let emoji = match severity.as_str() {
+            "Error" => "🔴",
+            "Warning" => "🟡", 
+            "Info" => "🔵",
+            "Suggestion" => "💡",
+            _ => "⚪",
+        };
+        output.push_str(&format!("{} **{}:** {}\n", emoji, severity, count));
+    }
+    output.push_str("\n");
+    
+    // Category breakdown  
+    output.push_str("### Issues by Category\n\n");
+    for (category, count) in &summary.by_category {
+        let emoji = match category.as_str() {
+            "Security" => "🔒",
+            "Performance" => "⚡",
+            "Bug" => "🐛",
+            "Style" => "🎨",
+            "Documentation" => "📚",
+            "Testing" => "🧪",
+            "Maintainability" => "🔧",
+            "Architecture" => "🏗️",
+            _ => "💭",
+        };
+        output.push_str(&format!("{} **{}:** {}\n", emoji, category, count));
+    }
+    output.push_str("\n");
+    
+    // Recommendations
+    if !summary.recommendations.is_empty() {
+        output.push_str("### Recommendations\n\n");
+        for rec in &summary.recommendations {
+            output.push_str(&format!("- {}\n", rec));
+        }
+        output.push_str("\n");
+    }
+    
+    output.push_str("---\n\n## Detailed Issues\n\n");
+    
+    // Group comments by file
+    let mut comments_by_file = std::collections::HashMap::new();
     for comment in comments {
-        output.push_str(&format!(
-            "## {}:{}\n\n**Severity:** {:?}\n**Category:** {:?}\n\n{}\n\n",
-            comment.file_path.display(),
-            comment.line_number,
-            comment.severity,
-            comment.category,
-            comment.content
-        ));
+        comments_by_file.entry(&comment.file_path)
+            .or_insert_with(Vec::new)
+            .push(comment);
+    }
+    
+    for (file_path, file_comments) in comments_by_file {
+        output.push_str(&format!("### {}\n\n", file_path.display()));
         
-        if let Some(suggestion) = &comment.suggestion {
-            output.push_str(&format!("**Suggestion:** {}\n\n", suggestion));
+        for comment in file_comments {
+            let severity_emoji = match comment.severity {
+                core::comment::Severity::Error => "🔴",
+                core::comment::Severity::Warning => "🟡",
+                core::comment::Severity::Info => "🔵", 
+                core::comment::Severity::Suggestion => "💡",
+            };
+            
+            let effort_badge = match comment.fix_effort {
+                core::comment::FixEffort::Low => "🟢 Quick Fix",
+                core::comment::FixEffort::Medium => "🟡 Moderate",
+                core::comment::FixEffort::High => "🔴 Complex",
+            };
+            
+            output.push_str(&format!(
+                "#### Line {} {} {:?}\n\n",
+                comment.line_number,
+                severity_emoji,
+                comment.category
+            ));
+            
+            output.push_str(&format!("**Confidence:** {:.0}%\n", comment.confidence * 100.0));
+            output.push_str(&format!("**Fix Effort:** {}\n\n", effort_badge));
+            
+            output.push_str(&format!("{}\n\n", comment.content));
+            
+            if let Some(suggestion) = &comment.suggestion {
+                output.push_str(&format!("💡 **Suggestion:** {}\n\n", suggestion));
+            }
+            
+            if let Some(code_suggestion) = &comment.code_suggestion {
+                output.push_str("**Code Suggestion:**\n");
+                output.push_str(&format!("```diff\n{}\n```\n\n", code_suggestion.diff));
+                output.push_str(&format!("_{}_ \n\n", code_suggestion.explanation));
+            }
+            
+            if !comment.tags.is_empty() {
+                output.push_str("**Tags:** ");
+                for (i, tag) in comment.tags.iter().enumerate() {
+                    if i > 0 { output.push_str(", "); }
+                    output.push_str(&format!("`{}`", tag));
+                }
+                output.push_str("\n\n");
+            }
+            
+            output.push_str("---\n\n");
         }
     }
     
+    output
+}
+
+async fn smart_review_command(
+    config: config::Config,
+    diff_path: Option<PathBuf>,
+    output_path: Option<PathBuf>,
+) -> Result<()> {
+    info!("Starting smart review analysis with model: {}", config.model);
+    
+    let diff_content = if let Some(path) = diff_path {
+        tokio::fs::read_to_string(path).await?
+    } else {
+        use std::io::Read;
+        let mut buffer = String::new();
+        std::io::stdin().read_to_string(&mut buffer)?;
+        buffer
+    };
+    
+    let diffs = core::DiffParser::parse_unified_diff(&diff_content)?;
+    info!("Parsed {} file diffs", diffs.len());
+    
+    let model_config = adapters::llm::ModelConfig {
+        model_name: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config.base_url.clone(),
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
+    };
+    
+    let adapter = adapters::llm::create_adapter(&model_config)?;
+    let mut all_comments = Vec::new();
+    
+    for diff in diffs {
+        let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
+        let mut context_chunks = context_fetcher.fetch_context_for_file(
+            &diff.file_path,
+            &diff.hunks.iter()
+                .map(|h| (h.new_start, h.new_start + h.new_lines))
+                .collect::<Vec<_>>()
+        ).await?;
+        
+        // Extract symbols and get definitions
+        let symbols = extract_symbols_from_diff(&diff);
+        if !symbols.is_empty() {
+            let definition_chunks = context_fetcher.fetch_related_definitions(&diff.file_path, &symbols).await?;
+            context_chunks.extend(definition_chunks);
+        }
+        
+        let (system_prompt, user_prompt) = core::SmartReviewPromptBuilder::build_enhanced_review_prompt(&diff, &context_chunks)?;
+        
+        let request = adapters::llm::LLMRequest {
+            system_prompt,
+            user_prompt,
+            temperature: Some(0.2), // Lower temperature for more consistent analysis
+            max_tokens: Some(4000),
+        };
+        
+        let response = adapter.complete(request).await?;
+        
+        if let Ok(raw_comments) = parse_smart_review_response(&response.content, &diff.file_path) {
+            let comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+            all_comments.extend(comments);
+        }
+    }
+    
+    // Generate summary and output results
+    let summary = core::CommentSynthesizer::generate_summary(&all_comments);
+    let output = format_smart_review_output(&all_comments, &summary);
+    
+    if let Some(path) = output_path {
+        tokio::fs::write(path, output).await?;
+    } else {
+        println!("{}", output);
+    }
+    
+    Ok(())
+}
+
+fn parse_smart_review_response(content: &str, file_path: &PathBuf) -> Result<Vec<core::comment::RawComment>> {
+    let mut comments = Vec::new();
+    let mut current_comment: Option<core::comment::RawComment> = None;
+    
+    for line in content.lines() {
+        let trimmed = line.trim();
+        
+        if trimmed.starts_with("ISSUE:") {
+            // Save previous comment if exists
+            if let Some(comment) = current_comment.take() {
+                comments.push(comment);
+            }
+            
+            // Start new comment
+            let title = trimmed.strip_prefix("ISSUE:").unwrap_or("").trim();
+            current_comment = Some(core::comment::RawComment {
+                file_path: file_path.clone(),
+                line_number: 1,
+                content: title.to_string(),
+                suggestion: None,
+            });
+        } else if trimmed.starts_with("LINE:") {
+            if let Some(ref mut comment) = current_comment {
+                if let Ok(line_num) = trimmed.strip_prefix("LINE:").unwrap_or("").trim().parse::<usize>() {
+                    comment.line_number = line_num;
+                }
+            }
+        } else if trimmed.starts_with("DESCRIPTION:") {
+            // Start collecting description on next line
+            continue;
+        } else if trimmed.starts_with("SUGGESTION:") {
+            // Start collecting suggestion on next line  
+            continue;
+        } else if !trimmed.is_empty() && 
+                  !trimmed.starts_with("SEVERITY:") && 
+                  !trimmed.starts_with("CATEGORY:") &&
+                  !trimmed.starts_with("CONFIDENCE:") &&
+                  !trimmed.starts_with("EFFORT:") &&
+                  !trimmed.starts_with("TAGS:") {
+            // This is content - add to current comment
+            if let Some(ref mut comment) = current_comment {
+                if !comment.content.is_empty() {
+                    comment.content.push(' ');
+                }
+                comment.content.push_str(trimmed);
+            }
+        }
+    }
+    
+    // Save last comment
+    if let Some(comment) = current_comment {
+        comments.push(comment);
+    }
+    
+    Ok(comments)
+}
+
+fn format_smart_review_output(comments: &[core::Comment], summary: &core::comment::ReviewSummary) -> String {
+    let mut output = String::new();
+    
+    output.push_str("# 🤖 Smart Review Analysis Results\n\n");
+    
+    // Executive Summary
+    output.push_str("## 📊 Executive Summary\n\n");
+    let score_emoji = if summary.overall_score >= 8.0 { "🟢" } else if summary.overall_score >= 6.0 { "🟡" } else { "🔴" };
+    output.push_str(&format!("{} **Code Quality Score:** {:.1}/10\n", score_emoji, summary.overall_score));
+    output.push_str(&format!("📝 **Total Issues Found:** {}\n", summary.total_comments));
+    output.push_str(&format!("🚨 **Critical Issues:** {}\n", summary.critical_issues));
+    output.push_str(&format!("📁 **Files Analyzed:** {}\n\n", summary.files_reviewed));
+    
+    // Quick Stats
+    output.push_str("### 📈 Issue Breakdown\n\n");
+    output.push_str("| Severity | Count | Category | Count |\n");
+    output.push_str("|----------|-------|----------|-------|\n");
+    
+    let severities = ["Error", "Warning", "Info", "Suggestion"];
+    let categories = ["Security", "Performance", "Bug", "Maintainability"];
+    
+    for (i, severity) in severities.iter().enumerate() {
+        let sev_count = summary.by_severity.get(*severity).unwrap_or(&0);
+        let cat = categories.get(i).unwrap_or(&"");
+        let cat_count = summary.by_category.get(*cat).unwrap_or(&0);
+        
+        output.push_str(&format!("| {} | {} | {} | {} |\n", severity, sev_count, cat, cat_count));
+    }
+    output.push_str("\n");
+    
+    // Actionable Recommendations
+    if !summary.recommendations.is_empty() {
+        output.push_str("### 🎯 Priority Actions\n\n");
+        for (i, rec) in summary.recommendations.iter().enumerate() {
+            output.push_str(&format!("{}. {}\n", i + 1, rec));
+        }
+        output.push_str("\n");
+    }
+    
+    if comments.is_empty() {
+        output.push_str("✅ **No issues found!** Your code looks good.\n");
+        return output;
+    }
+    
+    output.push_str("---\n\n## 🔍 Detailed Analysis\n\n");
+    
+    // Group by severity for better organization
+    let mut critical_issues = Vec::new();
+    let mut high_issues = Vec::new();
+    let mut medium_issues = Vec::new();
+    let mut low_issues = Vec::new();
+    
+    for comment in comments {
+        match comment.severity {
+            core::comment::Severity::Error => critical_issues.push(comment),
+            core::comment::Severity::Warning => high_issues.push(comment),
+            core::comment::Severity::Info => medium_issues.push(comment),
+            core::comment::Severity::Suggestion => low_issues.push(comment),
+        }
+    }
+    
+    // Output each severity group
+    if !critical_issues.is_empty() {
+        output.push_str("### 🔴 Critical Issues (Fix Immediately)\n\n");
+        for comment in critical_issues {
+            output.push_str(&format_detailed_comment(comment));
+        }
+    }
+    
+    if !high_issues.is_empty() {
+        output.push_str("### 🟡 High Priority Issues\n\n");
+        for comment in high_issues {
+            output.push_str(&format_detailed_comment(comment));
+        }
+    }
+    
+    if !medium_issues.is_empty() {
+        output.push_str("### 🔵 Medium Priority Issues\n\n");
+        for comment in medium_issues {
+            output.push_str(&format_detailed_comment(comment));
+        }
+    }
+    
+    if !low_issues.is_empty() {
+        output.push_str("### 💡 Suggestions & Improvements\n\n");
+        for comment in low_issues {
+            output.push_str(&format_detailed_comment(comment));
+        }
+    }
+    
+    output
+}
+
+fn format_detailed_comment(comment: &core::Comment) -> String {
+    let mut output = String::new();
+    
+    let category_emoji = match comment.category {
+        core::comment::Category::Security => "🔒",
+        core::comment::Category::Performance => "⚡",
+        core::comment::Category::Bug => "🐛",
+        core::comment::Category::Style => "🎨",
+        core::comment::Category::Documentation => "📚",
+        core::comment::Category::Testing => "🧪",
+        core::comment::Category::Maintainability => "🔧",
+        core::comment::Category::Architecture => "🏗️",
+        _ => "💭",
+    };
+    
+    let effort_badge = match comment.fix_effort {
+        core::comment::FixEffort::Low => "🟢 Quick Fix",
+        core::comment::FixEffort::Medium => "🟡 Moderate Effort", 
+        core::comment::FixEffort::High => "🔴 Significant Effort",
+    };
+    
+    output.push_str(&format!(
+        "#### {} **{}:{}** - {} {:?}\n\n",
+        category_emoji,
+        comment.file_path.display(),
+        comment.line_number,
+        effort_badge,
+        comment.category
+    ));
+    
+    output.push_str(&format!("**Confidence:** {:.0}% | ", comment.confidence * 100.0));
+    if !comment.tags.is_empty() {
+        output.push_str("**Tags:** ");
+        for (i, tag) in comment.tags.iter().enumerate() {
+            if i > 0 { output.push_str(", "); }
+            output.push_str(&format!("`{}`", tag));
+        }
+    }
+    output.push_str("\n\n");
+    
+    output.push_str(&format!("{}\n\n", comment.content));
+    
+    if let Some(suggestion) = &comment.suggestion {
+        output.push_str(&format!("**💡 Recommended Fix:**\n{}\n\n", suggestion));
+    }
+    
+    if let Some(code_suggestion) = &comment.code_suggestion {
+        output.push_str("**🔧 Code Example:**\n");
+        output.push_str(&format!("```diff\n{}\n```\n", code_suggestion.diff));
+        output.push_str(&format!("_{}_\n\n", code_suggestion.explanation));
+    }
+    
+    output.push_str("---\n\n");
     output
 }
 

@@ -13,6 +13,7 @@ A composable code review engine for automated diff analysis.
 - **Plugin System**: Extensible pre-analyzers and post-processors
 - **Multiple Outputs**: JSON, patch, or markdown formats
 - **CI/CD Ready**: GitHub Action, GitLab CI, and Docker support
+- **Smart Review**: Enhanced analysis with confidence scoring, fix effort estimation, and executive summaries
 
 ## Quick Start
 
@@ -69,6 +70,18 @@ diffscope pr --number 123
 
 # Post comments directly to PR
 diffscope pr --post-comments
+```
+
+### Smart Review (Enhanced Analysis)
+```bash
+# Comprehensive analysis with executive summary
+diffscope smart-review --diff changes.diff
+
+# Enhanced review from stdin  
+git diff | diffscope smart-review
+
+# Save detailed report to file
+diffscope smart-review --diff pr.patch --output detailed-report.md
 ```
 
 ### Use different models
@@ -180,13 +193,52 @@ Apache-2.0 License. See [LICENSE](LICENSE) for details.
 
 ## Example Output
 
-### Code Review
+### Standard Review
 ```
 Line 32: Security - Logging raw input data may expose sensitive information. 
 Risk of data leakage. Remove or sanitize before logging.
 
 Line 14: Bug - TODO indicates missing error handling. Could cause crashes. 
 Implement proper error handling.
+```
+
+### Smart Review Output
+```markdown
+# 🤖 Smart Review Analysis Results
+
+## 📊 Executive Summary
+
+🟡 **Code Quality Score:** 7.2/10
+📝 **Total Issues Found:** 3
+🚨 **Critical Issues:** 1
+📁 **Files Analyzed:** 2
+
+### 📈 Issue Breakdown
+| Severity | Count | Category | Count |
+|----------|-------|----------|-------|
+| Error | 1 | Security | 1 |
+| Warning | 2 | Performance | 1 |
+
+### 🎯 Priority Actions
+1. Address 1 security issue(s) immediately
+2. Consider a performance audit - multiple optimization opportunities found
+
+### 🔴 Critical Issues (Fix Immediately)
+
+#### 🔒 **auth.py:42** - 🔴 Significant Effort Security
+**Confidence:** 95% | **Tags:** `security`, `sql`, `injection`
+
+SQL injection vulnerability in user authentication. The query directly interpolates user input without parameterization.
+
+**💡 Recommended Fix:**
+Use parameterized queries: `query = "SELECT * FROM users WHERE username=%s AND password=%s"`
+
+**🔧 Code Example:**
+```diff
+- query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
++ query = "SELECT * FROM users WHERE username=%s AND password=%s"
++ cursor.execute(query, (username, password))
+```
 ```
 
 ### Commit Message Suggestion
