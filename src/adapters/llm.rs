@@ -48,7 +48,7 @@ pub struct Usage {
 #[async_trait]
 pub trait LLMAdapter: Send + Sync {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse>;
-    fn model_name(&self) -> &str;
+    fn _model_name(&self) -> &str;
 }
 
 pub fn create_adapter(config: &ModelConfig) -> Result<Box<dyn LLMAdapter>> {

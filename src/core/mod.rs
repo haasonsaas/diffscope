@@ -16,6 +16,5 @@ pub use comment::{Comment, CommentSynthesizer};
 pub use git::GitIntegration;
 pub use commit_prompt::CommitPromptBuilder;
 pub use smart_review_prompt::SmartReviewPromptBuilder;
-pub use pr_summary::{PRSummaryGenerator, PRSummary};
-pub use interactive::{InteractiveCommand, InteractiveProcessor};
+pub use pr_summary::PRSummaryGenerator;
 pub use changelog::ChangelogGenerator;

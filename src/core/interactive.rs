@@ -3,12 +3,14 @@ use regex::Regex;
 use std::collections::HashSet;
 use crate::adapters::llm::{LLMAdapter, LLMRequest};
 
+#[allow(dead_code)]
 pub struct InteractiveCommand {
     pub command: CommandType,
     pub args: Vec<String>,
     pub context: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandType {
     Review,
@@ -19,6 +21,7 @@ pub enum CommandType {
     Config,
 }
 
+#[allow(dead_code)]
 impl InteractiveCommand {
     pub fn parse(comment: &str) -> Option<Self> {
         let command_regex = Regex::new(r"@diffscope\s+(\w+)(?:\s+(.*))?").ok()?;
@@ -222,10 +225,12 @@ Interactive commands respect these configurations."#.to_string()
     }
 }
 
+#[allow(dead_code)]
 pub struct InteractiveProcessor {
     ignored_patterns: HashSet<String>,
 }
 
+#[allow(dead_code)]
 impl InteractiveProcessor {
     pub fn new() -> Self {
         Self {

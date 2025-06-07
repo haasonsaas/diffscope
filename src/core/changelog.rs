@@ -9,7 +9,7 @@ pub struct ChangelogEntry {
     pub commit_hash: String,
     pub message: String,
     pub author: String,
-    pub date: DateTime<Local>,
+    pub _date: DateTime<Local>,
     pub change_type: ChangeType,
     pub scope: Option<String>,
     pub breaking: bool,
@@ -172,7 +172,7 @@ impl ChangelogGenerator {
                 commit_hash: format!("{:.7}", commit.id()),
                 message: description,
                 author: commit.author().name().unwrap_or("Unknown").to_string(),
-                date: DateTime::from_timestamp(commit.time().seconds(), 0)
+                _date: DateTime::from_timestamp(commit.time().seconds(), 0)
                     .unwrap_or_default()
                     .with_timezone(&Local),
                 change_type,
@@ -195,7 +195,7 @@ impl ChangelogGenerator {
                 commit_hash: format!("{:.7}", commit.id()),
                 message: first_line.to_string(),
                 author: commit.author().name().unwrap_or("Unknown").to_string(),
-                date: DateTime::from_timestamp(commit.time().seconds(), 0)
+                _date: DateTime::from_timestamp(commit.time().seconds(), 0)
                     .unwrap_or_default()
                     .with_timezone(&Local),
                 change_type,
@@ -216,7 +216,7 @@ impl ChangelogGenerator {
         // Header
         output.push_str("# Changelog\n\n");
         
-        let date = Local::now().format("%Y-%m-%d");
+        let _date = Local::now().format("%Y-%m-%d");
         output.push_str(&format!("## [{} - {}]\n\n", 
             from_tag.unwrap_or("Start"), 
             to_ref

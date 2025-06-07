@@ -120,7 +120,7 @@ impl LLMAdapter for OpenAIAdapter {
         })
     }
     
-    fn model_name(&self) -> &str {
+    fn _model_name(&self) -> &str {
         &self.config.model_name
     }
 }

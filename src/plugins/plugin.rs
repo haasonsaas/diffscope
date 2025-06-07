@@ -6,6 +6,7 @@ use crate::core::{UnifiedDiff, LLMContextChunk, Comment};
 use crate::plugins::{PreAnalyzer, PostProcessor};
 
 #[async_trait]
+#[allow(dead_code)]
 pub trait Plugin: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
@@ -16,7 +17,7 @@ pub trait Plugin: Send + Sync {
 }
 
 pub struct PluginManager {
-    plugins: HashMap<String, Arc<dyn Plugin>>,
+    _plugins: HashMap<String, Arc<dyn Plugin>>,
     pre_analyzers: Vec<Arc<dyn PreAnalyzer>>,
     post_processors: Vec<Arc<dyn PostProcessor>>,
 }

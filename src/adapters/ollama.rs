@@ -25,8 +25,8 @@ struct OllamaResponse {
     response: String,
     model: String,
     done: bool,
-    context: Option<Vec<i32>>,
-    total_duration: Option<u64>,
+    _context: Option<Vec<i32>>,
+    _total_duration: Option<u64>,
     prompt_eval_count: Option<usize>,
     eval_count: Option<usize>,
 }
@@ -94,7 +94,7 @@ impl LLMAdapter for OllamaAdapter {
         })
     }
     
-    fn model_name(&self) -> &str {
+    fn _model_name(&self) -> &str {
         &self.config.model_name
     }
 }

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use crate::core::{UnifiedDiff, GitIntegration};
 use crate::adapters::llm::{LLMAdapter, LLMRequest};
-use std::collections::HashMap;
 
 pub struct PRSummaryGenerator;
 
@@ -150,7 +149,7 @@ TESTING_NOTES: [what to test]"#.to_string()
             breaking_changes: None,
             testing_notes: String::new(),
             stats,
-            visual_diff: None,
+            _visual_diff: None,
         };
         
         // Parse structured response
@@ -204,7 +203,7 @@ pub struct PRSummary {
     pub breaking_changes: Option<String>,
     pub testing_notes: String,
     pub stats: ChangeStats,
-    pub visual_diff: Option<String>,
+    pub _visual_diff: Option<String>,
 }
 
 #[derive(Debug, Clone)]
