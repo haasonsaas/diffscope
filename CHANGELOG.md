@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2025-06-06
+
+### Changed
+- Renamed `evalops-fixes.py` to `security-fixes-template.py` for generic usage
+- Removed company-specific references from example files
+
 ## [0.4.2] - 2025-06-06
 
 ### Added
