@@ -4,7 +4,7 @@ A composable code review engine for automated diff analysis.
 
 ## Features
 
-- **Model Agnostic**: Works with OpenAI, Anthropic Claude 4, Ollama, and any OpenAI-compatible API
+- **Model Agnostic**: Works with OpenAI, Anthropic Claude, Ollama, and any OpenAI-compatible API
 - **Git Integration**: Review uncommitted, staged, or branch changes directly
 - **PR Reviews**: Analyze and comment on GitHub pull requests with interactive commands
 - **Smart Prompting**: Advanced prompt engineering with examples, XML structure, and chain-of-thought
@@ -129,18 +129,19 @@ git diff | diffscope review --model claude-3-5-sonnet-20241022
 
 # Local Ollama
 git diff | diffscope review --model ollama:codellama
+
+# Custom API endpoint
+export OPENAI_BASE_URL=https://api.custom.com/v1
+git diff | diffscope review --model custom-model
 ```
 
 ### Supported Models
 
 **OpenAI**: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
 
-**Anthropic**: 
-- Claude 4: claude-opus-4-20250514, claude-sonnet-4-20250514
-- Claude 3.5: claude-3-5-sonnet-20241022, claude-3-5-haiku-20240307
-- Claude 3: claude-3-opus-20240229, claude-3-haiku-20240307
+**Anthropic**: claude-3-5-sonnet-20241022, claude-3-5-haiku-20240307, claude-3-opus-20240229, claude-3-haiku-20240307, and newer Claude models
 
-**Ollama**: Any locally installed model (codellama, llama3.2, mistral, etc.)
+**Ollama**: Any locally installed model (codellama, llama3.2, mistral, etc.) - use `ollama:model-name` format
 
 ### Output Formats
 ```bash
@@ -181,6 +182,18 @@ model: gpt-4o
 temperature: 0.2
 max_tokens: 4000
 system_prompt: "Focus on security vulnerabilities, performance issues, and best practices"
+
+# Built-in plugins (enabled by default)
+plugins:
+  eslint: true          # JavaScript/TypeScript linting
+  semgrep: true         # Security-focused static analysis  
+  duplicate_filter: true # Remove duplicate comments
+
+# Global exclusions
+exclude_patterns:
+  - "**/*.generated.*"
+  - "**/node_modules/**"
+  - "**/__pycache__/**"
 ```
 
 ## Plugin Development
@@ -390,18 +403,12 @@ system_prompt: |
   Prioritize by severity: Security > Performance > Maintainability
 
 # File filters for monorepo
-include_patterns:
-  - "src/**/*.py"
-  - "tests/**/*.py"
-  - "alembic/versions/*.py"
-  - "*.yml"
-  - "Dockerfile*"
-
 exclude_patterns:
   - "**/__pycache__/**"
   - "**/venv/**"
   - "**/.pytest_cache/**"
   - "**/node_modules/**"
+  - "**/*.generated.*"
 
 # Review configuration
 max_diff_size: 10000
@@ -461,7 +468,34 @@ stage('AI Code Review') {
 5. **Output Parsing**: Handle both empty reviews and JSON parsing errors gracefully
 6. **Conditional Runs**: Skip reviews on draft PRs or specific file types
 
-## New Features in v0.5.0
+## Available Commands
+
+### Core Commands
+```bash
+# Review diffs
+diffscope review [--diff file.patch]
+
+# Enhanced analysis with confidence scoring
+diffscope smart-review [--diff file.patch]
+
+# Git integration
+diffscope git uncommitted    # Review uncommitted changes
+diffscope git staged         # Review staged changes
+diffscope git branch [base]  # Compare against branch (default: main)
+diffscope git suggest        # Generate commit messages
+diffscope git pr-title       # Generate PR titles
+
+# Pull request operations
+diffscope pr [--number N] [--post-comments] [--summary]
+
+# File comparison
+diffscope compare --old-file old.py --new-file new.py
+
+# Changelog generation
+diffscope changelog --from v0.4.0 [--to HEAD] [--release v0.5.0]
+```
+
+## New Features in v0.5.3
 
 ### 🔄 Changelog Generation
 
@@ -505,20 +539,21 @@ exclude_patterns:
 paths:
   # API endpoints need security focus
   "src/api/**":
-    focus:
-      - security
-      - validation
-      - authentication
-    severity_overrides:
-      security: error  # All security issues become errors
+    ignore_patterns:
+      - "**/*.generated.*"
+    extra_context:
+      - "src/auth/**"
     system_prompt: |
       Focus on SQL injection, auth bypass, and input validation
+    severity_overrides:
+      security: error  # All security issues become errors
 
-  # Test files have different standards
+  # Test files have different standards  
   "tests/**":
-    focus:
-      - coverage
-      - assertions
+    ignore_patterns:
+      - "**/*.snap"
+    extra_context:
+      - "src/main/**"
     severity_overrides:
       style: suggestion  # Style issues are just suggestions
 
@@ -530,7 +565,9 @@ paths:
 
 ### 💬 Interactive PR Commands
 
-Respond to pull request comments with interactive commands:
+*Note: Interactive commands are currently in development.*
+
+Planned support for responding to pull request comments with interactive commands:
 
 ```
 @diffscope review                 # Re-review the changes
