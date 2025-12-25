@@ -1,0 +1,6 @@
+# Diffscope LSP config for Kotlin
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: kotlin-lsp
+symbol_index_lsp_languages:
+  kt: kotlin

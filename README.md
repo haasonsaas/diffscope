@@ -223,7 +223,7 @@ exclude_patterns:
   - "**/__pycache__/**"
 ```
 
-Set `symbol_index_provider: lsp` to use a language server; it falls back to regex indexing if the LSP binary is missing. Configure `symbol_index_lsp_languages` and `symbol_index_lsp_command` to match your server (for example, `typescript-language-server --stdio` with `ts`/`tsx` language IDs). If you omit `symbol_index_lsp_command`, diffscope will try to auto-detect a server based on installed binaries and the file types in your repo.
+Set `symbol_index_provider: lsp` to use a language server; it falls back to regex indexing if the LSP binary is missing. Configure `symbol_index_lsp_languages` and `symbol_index_lsp_command` to match your server (for example, `typescript-language-server --stdio` with `ts`/`tsx` language IDs). If you omit `symbol_index_lsp_command`, diffscope will try to auto-detect a server based on installed binaries and the file types in your repo. You can also force a server for a single run with `--lsp-command`.
 
 ### LSP Symbol Index Examples (All Common Languages)
 
@@ -300,7 +300,13 @@ symbol_index_lsp_languages:
 
 ### LSP Setup Notes (Install + Command)
 
-For detailed install commands, OS-specific package manager options, and troubleshooting, see `docs/lsp.md`.
+For detailed install commands, OS-specific package manager options, and troubleshooting, see `docs/lsp.md`. For ready-made configs per language, see `examples/lsp/`.
+
+You can validate your setup with:
+
+```
+diffscope lsp-check
+```
 
 ## Plugin Development
 
@@ -626,6 +632,9 @@ diffscope pr [--number N] [--post-comments] [--summary]
 
 # Repository check (uncommitted changes at path)
 diffscope check [path]
+
+# LSP preflight checks
+diffscope lsp-check [path]
 
 # File comparison
 diffscope compare --old-file old.py --new-file new.py

@@ -1,0 +1,6 @@
+# Diffscope LSP config for Go
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: gopls
+symbol_index_lsp_languages:
+  go: go

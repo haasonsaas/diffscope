@@ -97,3 +97,9 @@ diffscope smart-review --old-file src/old.py --new-file src/new.py
 5. **Professional Reporting**: Executive summaries suitable for team reviews
 
 This enhanced system provides professional-grade code review capabilities while maintaining the simplicity and flexibility of the original diffscope architecture.
+
+## Symbol Indexing
+
+- Regex and LSP-backed symbol indexing with auto-detection when `symbol_index_lsp_command` is omitted.
+- LSP preflight command: `diffscope lsp-check` validates binaries, language IDs, and unmapped extensions.
+- Ready-to-copy LSP configs in `examples/lsp/` and setup guide in `docs/lsp.md`.

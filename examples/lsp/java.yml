@@ -1,0 +1,6 @@
+# Diffscope LSP config for Java
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: "jdtls -configuration /path/to/config -data /path/to/workspace"
+symbol_index_lsp_languages:
+  java: java

@@ -107,6 +107,34 @@ impl SymbolIndex {
         choose_lsp_command(&extension_counts, &enabled_extensions)
     }
 
+    pub fn scan_extension_counts<F>(
+        repo_root: &Path,
+        max_files: usize,
+        should_exclude: F,
+    ) -> HashMap<String, usize>
+    where
+        F: Fn(&PathBuf) -> bool,
+    {
+        if max_files == 0 {
+            return HashMap::new();
+        }
+        let enabled_extensions = HashSet::new();
+        collect_extension_counts(
+            repo_root,
+            max_files.min(LSP_DETECT_MAX_FILES),
+            &enabled_extensions,
+            should_exclude,
+        )
+    }
+
+    pub fn lsp_command_available(command: &str) -> bool {
+        let program = match command_program(command) {
+            Some(program) => program,
+            None => return false,
+        };
+        is_program_available(&program)
+    }
+
     pub fn build<F>(
         repo_root: &Path,
         max_files: usize,
@@ -437,6 +465,15 @@ fn choose_lsp_command(
     best_command.map(|command| command.to_string())
 }
 
+fn split_command(command: &str) -> Result<Vec<String>> {
+    shell_words::split(command).map_err(|err| anyhow::anyhow!(err.to_string()))
+}
+
+fn command_program(command: &str) -> Option<String> {
+    let parts = split_command(command).ok()?;
+    parts.first().cloned()
+}
+
 fn is_program_available(program: &str) -> bool {
     if program.trim().is_empty() {
         return false;
@@ -649,7 +686,7 @@ struct LspClient {
 
 impl LspClient {
     fn spawn(command: &str, root: &Path) -> Result<Self> {
-        let parts = shell_words::split(command).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        let parts = split_command(command)?;
         let (program, args) = parts
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("Empty LSP command"))?;

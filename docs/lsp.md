@@ -10,6 +10,12 @@ If `symbol_index_provider: lsp` and `symbol_index_lsp_command` is not set, diffs
 
 If it picks the wrong server, set `symbol_index_lsp_command` explicitly.
 
+## CLI Overrides
+
+- Force a command for this run: `diffscope --lsp-command "typescript-language-server --stdio" smart-review --diff diff.patch`
+- Preflight your setup: `diffscope lsp-check` (prints the detected command, whether it is available on PATH, and any unmapped extensions)
+- Ready-to-copy configs live in `examples/lsp/`.
+
 ## Package Manager Matrix (brew/apt/choco)
 
 Use these when you prefer OS-level packages. If a cell says "manual", use the language-specific install section below.
@@ -72,3 +78,4 @@ bin/jdtls -configuration /path/to/config -data /path/to/workspace
 - LSP binary not found: check PATH or use an absolute path in `symbol_index_lsp_command`.
 - Server expects stdio: use the `--stdio` form when required (e.g., TypeScript, Solargraph).
 - JDT LS needs a unique `-data` directory per workspace; configure a stable path.
+- Use `diffscope lsp-check` to see unmapped extensions and missing binaries.

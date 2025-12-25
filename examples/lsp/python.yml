@@ -1,0 +1,7 @@
+# Diffscope LSP config for Python
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: pylsp
+symbol_index_lsp_languages:
+  py: python
+  pyi: python

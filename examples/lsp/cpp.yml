@@ -1,0 +1,11 @@
+# Diffscope LSP config for C/C++
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: clangd
+symbol_index_lsp_languages:
+  c: c
+  h: c
+  cc: cpp
+  cpp: cpp
+  cxx: cpp
+  hpp: cpp

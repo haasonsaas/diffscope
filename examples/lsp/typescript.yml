@@ -1,0 +1,9 @@
+# Diffscope LSP config for TypeScript/JavaScript
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: "typescript-language-server --stdio"
+symbol_index_lsp_languages:
+  ts: typescript
+  tsx: typescriptreact
+  js: javascript
+  jsx: javascriptreact

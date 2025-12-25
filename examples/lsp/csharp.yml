@@ -1,0 +1,6 @@
+# Diffscope LSP config for C#
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: csharp-ls
+symbol_index_lsp_languages:
+  cs: csharp

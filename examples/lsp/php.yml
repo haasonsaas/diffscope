@@ -1,0 +1,6 @@
+# Diffscope LSP config for PHP
+symbol_index: true
+symbol_index_provider: lsp
+symbol_index_lsp_command: "phpactor language-server"
+symbol_index_lsp_languages:
+  php: php
