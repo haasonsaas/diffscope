@@ -169,6 +169,12 @@ fn should_use_responses_api(config: &ModelConfig) -> bool {
         return flag;
     }
 
+    if let Some(base_url) = config.base_url.as_ref() {
+        if !base_url.contains("openai.com") {
+            return false;
+        }
+    }
+
     !config.model_name.starts_with("gpt-3.5")
 }
 

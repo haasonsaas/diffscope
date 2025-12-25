@@ -39,7 +39,7 @@ impl ContextFetcher {
 
         let full_path = self.repo_path.join(file_path);
         if full_path.exists() {
-            let content = tokio::fs::read_to_string(&full_path).await?;
+            let content = read_file_lossy(&full_path).await?;
             let file_lines: Vec<&str> = content.lines().collect();
             let merged_ranges = merge_ranges(lines);
 
@@ -100,7 +100,7 @@ impl ContextFetcher {
 
         for path in matched_paths.into_iter().take(max_files) {
             let relative_path = path.strip_prefix(&self.repo_path).unwrap_or(&path);
-            let content = tokio::fs::read_to_string(&path).await?;
+            let content = read_file_lossy(&path).await?;
             let snippet = content
                 .lines()
                 .take(max_lines)
@@ -135,7 +135,7 @@ impl ContextFetcher {
         // Search for symbol definitions in the same file first
         let full_path = self.repo_path.join(file_path);
         if full_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+            if let Ok(content) = read_file_lossy(&full_path).await {
                 let lines: Vec<&str> = content.lines().collect();
 
                 for symbol in symbols {
@@ -192,4 +192,14 @@ fn merge_ranges(lines: &[(usize, usize)]) -> Vec<(usize, usize)> {
     }
 
     merged
+}
+
+async fn read_file_lossy(path: &Path) -> Result<String> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) => Ok(content),
+        Err(_) => {
+            let bytes = tokio::fs::read(path).await?;
+            Ok(String::from_utf8_lossy(&bytes).to_string())
+        }
+    }
 }
