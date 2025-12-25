@@ -1,7 +1,7 @@
+use crate::adapters::llm::{LLMAdapter, LLMRequest};
 use anyhow::Result;
 use regex::Regex;
 use std::collections::HashSet;
-use crate::adapters::llm::{LLMAdapter, LLMRequest};
 
 #[allow(dead_code)]
 pub struct InteractiveCommand {
@@ -25,11 +25,11 @@ pub enum CommandType {
 impl InteractiveCommand {
     pub fn parse(comment: &str) -> Option<Self> {
         let command_regex = Regex::new(r"@diffscope\s+(\w+)(?:\s+(.*))?").ok()?;
-        
+
         if let Some(captures) = command_regex.captures(comment) {
             let command_str = captures.get(1)?.as_str();
             let args_str = captures.get(2).map(|m| m.as_str()).unwrap_or("");
-            
+
             let command_type = match command_str.to_lowercase().as_str() {
                 "review" => CommandType::Review,
                 "ignore" => CommandType::Ignore,
@@ -39,13 +39,13 @@ impl InteractiveCommand {
                 "config" => CommandType::Config,
                 _ => return None,
             };
-            
+
             let args = if args_str.is_empty() {
                 Vec::new()
             } else {
                 args_str.split_whitespace().map(String::from).collect()
             };
-            
+
             Some(InteractiveCommand {
                 command: command_type,
                 args,
@@ -55,7 +55,7 @@ impl InteractiveCommand {
             None
         }
     }
-    
+
     pub async fn execute(
         &self,
         adapter: &Box<dyn LLMAdapter>,
@@ -70,7 +70,7 @@ impl InteractiveCommand {
             CommandType::Config => Ok(Self::get_config_info()),
         }
     }
-    
+
     async fn execute_review(
         &self,
         adapter: &Box<dyn LLMAdapter>,
@@ -81,32 +81,39 @@ impl InteractiveCommand {
                 format!("Review the following code changes:\n\n{}", diff)
             } else {
                 let focus = self.args.join(" ");
-                format!("Review the following code changes with focus on {}:\n\n{}", focus, diff)
+                format!(
+                    "Review the following code changes with focus on {}:\n\n{}",
+                    focus, diff
+                )
             };
-            
+
             let request = LLMRequest {
-                system_prompt: "You are a code reviewer. Provide concise, actionable feedback.".to_string(),
+                system_prompt: "You are a code reviewer. Provide concise, actionable feedback."
+                    .to_string(),
                 user_prompt: prompt,
                 temperature: Some(0.3),
                 max_tokens: Some(1000),
             };
-            
+
             let response = adapter.complete(request).await?;
             Ok(format!("## 🔍 Code Review\n\n{}", response.content))
         } else {
             Ok("No diff content available for review.".to_string())
         }
     }
-    
+
     fn execute_ignore(&self) -> Result<String> {
         if self.args.is_empty() {
-            Ok("Please specify what to ignore (e.g., @diffscope ignore src/generated/)".to_string())
+            Ok(
+                "Please specify what to ignore (e.g., @diffscope ignore src/generated/)"
+                    .to_string(),
+            )
         } else {
             let patterns = self.args.join(", ");
             Ok(format!("✅ Will ignore: {}\n\nAdd these patterns to your .diffscope.yml for permanent configuration.", patterns))
         }
     }
-    
+
     async fn execute_explain(
         &self,
         adapter: &Box<dyn LLMAdapter>,
@@ -117,58 +124,68 @@ impl InteractiveCommand {
         } else {
             // Try to find specific line or section
             let target = self.args.join(" ");
-            format!("Explain the following in the context of the code changes: {}", target)
+            format!(
+                "Explain the following in the context of the code changes: {}",
+                target
+            )
         };
-        
+
         let request = LLMRequest {
-            system_prompt: "You are a helpful code explainer. Provide clear, educational explanations.".to_string(),
+            system_prompt:
+                "You are a helpful code explainer. Provide clear, educational explanations."
+                    .to_string(),
             user_prompt: format!("Explain this code or change:\n\n{}", context),
             temperature: Some(0.5),
             max_tokens: Some(800),
         };
-        
+
         let response = adapter.complete(request).await?;
         Ok(format!("## 💡 Explanation\n\n{}", response.content))
     }
-    
+
     async fn execute_generate(&self, adapter: &Box<dyn LLMAdapter>) -> Result<String> {
         if self.args.is_empty() {
-            return Ok("Please specify what to generate (e.g., @diffscope generate tests)".to_string());
+            return Ok(
+                "Please specify what to generate (e.g., @diffscope generate tests)".to_string(),
+            );
         }
-        
+
         let target = self.args[0].as_str();
         let context = self.args[1..].join(" ");
-        
+
         let (system_prompt, user_prompt) = match target {
             "tests" => (
                 "You are a test generation expert. Generate comprehensive tests.",
-                format!("Generate unit tests for the following context: {}", context)
+                format!("Generate unit tests for the following context: {}", context),
             ),
             "docs" => (
                 "You are a documentation expert. Generate clear, comprehensive documentation.",
-                format!("Generate documentation for: {}", context)
+                format!("Generate documentation for: {}", context),
             ),
             "types" => (
                 "You are a TypeScript/type system expert. Generate proper type definitions.",
-                format!("Generate type definitions for: {}", context)
+                format!("Generate type definitions for: {}", context),
             ),
             _ => (
                 "You are a helpful code generator.",
-                format!("Generate {} for: {}", target, context)
+                format!("Generate {} for: {}", target, context),
             ),
         };
-        
+
         let request = LLMRequest {
             system_prompt: system_prompt.to_string(),
             user_prompt,
             temperature: Some(0.7),
             max_tokens: Some(1500),
         };
-        
+
         let response = adapter.complete(request).await?;
-        Ok(format!("## 🔨 Generated {}\n\n```\n{}\n```", target, response.content))
+        Ok(format!(
+            "## 🔨 Generated {}\n\n```\n{}\n```",
+            target, response.content
+        ))
     }
-    
+
     fn get_help_text() -> String {
         r#"## 🤖 DiffScope Interactive Commands
 
@@ -195,9 +212,10 @@ Available commands:
 
 ### Other
 - `@diffscope help` - Show this help message
-- `@diffscope config` - Show current configuration"#.to_string()
+- `@diffscope config` - Show current configuration"#
+            .to_string()
     }
-    
+
     fn get_config_info() -> String {
         r#"## ⚙️ Current Configuration
 
@@ -221,7 +239,8 @@ paths:
     focus: ["coverage", "assertions"]
 ```
 
-Interactive commands respect these configurations."#.to_string()
+Interactive commands respect these configurations."#
+            .to_string()
     }
 }
 
@@ -237,11 +256,11 @@ impl InteractiveProcessor {
             ignored_patterns: HashSet::new(),
         }
     }
-    
+
     pub fn add_ignore_pattern(&mut self, pattern: &str) {
         self.ignored_patterns.insert(pattern.to_string());
     }
-    
+
     pub fn should_ignore(&self, path: &str) -> bool {
         self.ignored_patterns.iter().any(|pattern| {
             // Simple glob matching

@@ -1,10 +1,10 @@
+use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
-use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 
 pub struct AnthropicAdapter {
     client: Client,
@@ -53,14 +53,16 @@ impl AnthropicAdapter {
         let api_key = config.api_key.clone()
             .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
             .context("Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or provide in config")?;
-        
-        let base_url = config.base_url.clone()
+
+        let base_url = config
+            .base_url
+            .clone()
             .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
-        
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
-        
+
         Ok(Self {
             client,
             config,
@@ -109,13 +111,11 @@ impl AnthropicAdapter {
 #[async_trait]
 impl LLMAdapter for AnthropicAdapter {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
-        let messages = vec![
-            Message {
-                role: "user".to_string(),
-                content: request.user_prompt,
-            },
-        ];
-        
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: request.user_prompt,
+        }];
+
         let anthropic_request = AnthropicRequest {
             model: self.config.model_name.clone(),
             messages,
@@ -123,24 +123,28 @@ impl LLMAdapter for AnthropicAdapter {
             temperature: request.temperature.unwrap_or(self.config.temperature),
             system: request.system_prompt,
         };
-        
+
         let url = format!("{}/messages", self.base_url);
-        let response = self.send_with_retry(|| {
-            self.client
-                .post(&url)
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("anthropic-beta", "messages-2023-12-15")
-                .header("Content-Type", "application/json")
-                .json(&anthropic_request)
-        })
-        .await
-        .context("Failed to send request to Anthropic")?;
-        
-        let anthropic_response: AnthropicResponse = response.json().await
+        let response = self
+            .send_with_retry(|| {
+                self.client
+                    .post(&url)
+                    .header("x-api-key", &self.api_key)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("anthropic-beta", "messages-2023-12-15")
+                    .header("Content-Type", "application/json")
+                    .json(&anthropic_request)
+            })
+            .await
+            .context("Failed to send request to Anthropic")?;
+
+        let anthropic_response: AnthropicResponse = response
+            .json()
+            .await
             .context("Failed to parse Anthropic response")?;
-        
-        let content = anthropic_response.content
+
+        let content = anthropic_response
+            .content
             .first()
             .map(|c| {
                 // Verify it's a text content type
@@ -151,18 +155,19 @@ impl LLMAdapter for AnthropicAdapter {
                 }
             })
             .unwrap_or_default();
-        
+
         Ok(LLMResponse {
             content,
             model: anthropic_response.model,
             usage: Some(Usage {
                 prompt_tokens: anthropic_response.usage.input_tokens,
                 completion_tokens: anthropic_response.usage.output_tokens,
-                total_tokens: anthropic_response.usage.input_tokens + anthropic_response.usage.output_tokens,
+                total_tokens: anthropic_response.usage.input_tokens
+                    + anthropic_response.usage.output_tokens,
             }),
         })
     }
-    
+
     fn _model_name(&self) -> &str {
         &self.config.model_name
     }

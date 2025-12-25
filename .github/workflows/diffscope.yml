@@ -7,17 +7,24 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: diffscope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
           
       - name: Get PR diff
         id: diff
         run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
           
       - name: Run DiffScope
@@ -33,14 +40,18 @@ jobs:
           script: |
             const fs = require('fs');
             const comments = JSON.parse(fs.readFileSync('comments.json', 'utf8'));
+            const headSha = context.payload.pull_request.head.sha;
             
             for (const comment of comments) {
+              if (!comment.file_path || !comment.line_number || comment.line_number < 1) {
+                continue;
+              }
               await github.rest.pulls.createReviewComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.issue.number,
                 body: `**${comment.severity}**: ${comment.content}`,
-                commit_id: context.sha,
+                commit_id: headSha,
                 path: comment.file_path,
                 line: comment.line_number
               });

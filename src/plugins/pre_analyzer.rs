@@ -1,6 +1,6 @@
+use crate::core::{LLMContextChunk, UnifiedDiff};
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::core::{UnifiedDiff, LLMContextChunk};
 
 #[async_trait]
 pub trait PreAnalyzer: Send + Sync {

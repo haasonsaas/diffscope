@@ -1,29 +1,29 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_model")]
     pub model: String,
-    
+
     #[serde(default = "default_temperature")]
     pub temperature: f32,
-    
+
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
-    
+
     pub system_prompt: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
-    
+
     #[serde(default)]
     pub plugins: PluginConfig,
-    
+
     #[serde(default)]
     pub exclude_patterns: Vec<String>,
-    
+
     #[serde(default)]
     pub paths: HashMap<String, PathConfig>,
 }
@@ -32,15 +32,15 @@ pub struct Config {
 pub struct PathConfig {
     #[serde(default)]
     pub focus: Vec<String>,
-    
+
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
-    
+
     #[serde(default)]
     pub extra_context: Vec<String>,
-    
+
     pub system_prompt: Option<String>,
-    
+
     #[serde(default)]
     pub severity_overrides: HashMap<String, String>,
 }
@@ -49,10 +49,10 @@ pub struct PathConfig {
 pub struct PluginConfig {
     #[serde(default = "default_true")]
     pub eslint: bool,
-    
+
     #[serde(default = "default_true")]
     pub semgrep: bool,
-    
+
     #[serde(default = "default_true")]
     pub duplicate_filter: bool,
 }
@@ -94,7 +94,7 @@ impl Config {
             let config: Config = serde_yaml::from_str(&content)?;
             return Ok(config);
         }
-        
+
         // Try alternative names
         let alt_config_path = PathBuf::from(".diffscope.yaml");
         if alt_config_path.exists() {
@@ -102,7 +102,7 @@ impl Config {
             let config: Config = serde_yaml::from_str(&content)?;
             return Ok(config);
         }
-        
+
         // Try in home directory
         if let Some(home_dir) = dirs::home_dir() {
             let home_config = home_dir.join(".diffscope.yml");
@@ -112,11 +112,11 @@ impl Config {
                 return Ok(config);
             }
         }
-        
+
         // Return default config if no file found
         Ok(Config::default())
     }
-    
+
     pub fn merge_with_cli(&mut self, cli_model: Option<String>, cli_prompt: Option<String>) {
         if let Some(model) = cli_model {
             self.model = model;
@@ -139,13 +139,13 @@ impl Config {
             self.max_tokens = default_max_tokens();
         }
     }
-    
+
     pub fn get_path_config(&self, file_path: &PathBuf) -> Option<&PathConfig> {
         let file_path_str = file_path.to_string_lossy();
-        
+
         // Find the most specific matching path
         let mut best_match: Option<(&String, &PathConfig)> = None;
-        
+
         for (pattern, config) in &self.paths {
             if self.path_matches(&file_path_str, pattern) {
                 // Keep the most specific match (longest pattern)
@@ -154,20 +154,20 @@ impl Config {
                 }
             }
         }
-        
+
         best_match.map(|(_, config)| config)
     }
-    
+
     pub fn should_exclude(&self, file_path: &PathBuf) -> bool {
         let file_path_str = file_path.to_string_lossy();
-        
+
         // Check global exclude patterns
         for pattern in &self.exclude_patterns {
             if self.path_matches(&file_path_str, pattern) {
                 return true;
             }
         }
-        
+
         // Check path-specific ignore patterns
         if let Some(path_config) = self.get_path_config(file_path) {
             for pattern in &path_config.ignore_patterns {
@@ -176,10 +176,10 @@ impl Config {
                 }
             }
         }
-        
+
         false
     }
-    
+
     fn path_matches(&self, path: &str, pattern: &str) -> bool {
         // Simple glob matching
         if pattern.contains('*') {

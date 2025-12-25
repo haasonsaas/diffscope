@@ -1,10 +1,10 @@
+use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
-use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 
 pub struct OllamaAdapter {
     client: Client,
@@ -35,13 +35,15 @@ struct OllamaResponse {
 
 impl OllamaAdapter {
     pub fn new(config: ModelConfig) -> Result<Self> {
-        let base_url = config.base_url.clone()
+        let base_url = config
+            .base_url
+            .clone()
             .unwrap_or_else(|| "http://localhost:11434".to_string());
-        
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()?;
-        
+
         Ok(Self {
             client,
             config,
@@ -89,10 +91,12 @@ impl OllamaAdapter {
 #[async_trait]
 impl LLMAdapter for OllamaAdapter {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
-        let model_name = self.config.model_name
+        let model_name = self
+            .config
+            .model_name
             .strip_prefix("ollama:")
             .unwrap_or(&self.config.model_name);
-        
+
         let ollama_request = OllamaRequest {
             model: model_name.to_string(),
             prompt: request.user_prompt,
@@ -101,19 +105,18 @@ impl LLMAdapter for OllamaAdapter {
             num_predict: request.max_tokens.unwrap_or(self.config.max_tokens),
             stream: false,
         };
-        
+
         let url = format!("{}/api/generate", self.base_url);
-        let response = self.send_with_retry(|| {
-            self.client
-                .post(&url)
-                .json(&ollama_request)
-        })
-        .await
-        .context("Failed to send request to Ollama")?;
-        
-        let ollama_response: OllamaResponse = response.json().await
+        let response = self
+            .send_with_retry(|| self.client.post(&url).json(&ollama_request))
+            .await
+            .context("Failed to send request to Ollama")?;
+
+        let ollama_response: OllamaResponse = response
+            .json()
+            .await
             .context("Failed to parse Ollama response")?;
-        
+
         Ok(LLMResponse {
             content: ollama_response.response,
             model: ollama_response.model,
@@ -121,14 +124,15 @@ impl LLMAdapter for OllamaAdapter {
                 Some(Usage {
                     prompt_tokens: ollama_response.prompt_eval_count.unwrap_or(0),
                     completion_tokens: ollama_response.eval_count.unwrap_or(0),
-                    total_tokens: ollama_response.prompt_eval_count.unwrap_or(0) + ollama_response.eval_count.unwrap_or(0),
+                    total_tokens: ollama_response.prompt_eval_count.unwrap_or(0)
+                        + ollama_response.eval_count.unwrap_or(0),
                 })
             } else {
                 None
             },
         })
     }
-    
+
     fn _model_name(&self) -> &str {
         &self.config.model_name
     }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
@@ -69,16 +69,16 @@ pub struct CommentSynthesizer;
 impl CommentSynthesizer {
     pub fn synthesize(raw_comments: Vec<RawComment>) -> Result<Vec<Comment>> {
         let mut comments = Vec::new();
-        
+
         for raw in raw_comments {
             if let Some(comment) = Self::process_raw_comment(raw)? {
                 comments.push(comment);
             }
         }
-        
+
         Self::deduplicate_comments(&mut comments);
         Self::sort_by_priority(&mut comments);
-        
+
         Ok(comments)
     }
 
@@ -91,12 +91,12 @@ impl CommentSynthesizer {
         for comment in comments {
             let severity_str = format!("{:?}", comment.severity);
             *by_severity.entry(severity_str).or_insert(0) += 1;
-            
+
             let category_str = format!("{:?}", comment.category);
             *by_category.entry(category_str).or_insert(0) += 1;
-            
+
             files.insert(comment.file_path.clone());
-            
+
             if matches!(comment.severity, Severity::Error) {
                 critical_issues += 1;
             }
@@ -125,9 +125,9 @@ impl CommentSynthesizer {
             .category
             .clone()
             .unwrap_or_else(|| Self::determine_category(&raw.content));
-        let confidence = raw.confidence.unwrap_or_else(|| {
-            Self::calculate_confidence(&raw.content, &severity, &category)
-        });
+        let confidence = raw
+            .confidence
+            .unwrap_or_else(|| Self::calculate_confidence(&raw.content, &severity, &category));
         let confidence = confidence.max(0.0).min(1.0);
         let tags = if raw.tags.is_empty() {
             Self::extract_tags(&raw.content, &category)
@@ -139,7 +139,7 @@ impl CommentSynthesizer {
             .clone()
             .unwrap_or_else(|| Self::determine_fix_effort(&raw.content, &category));
         let code_suggestion = Self::generate_code_suggestion(&raw);
-        
+
         Ok(Some(Comment {
             file_path: raw.file_path,
             line_number: raw.line_number,
@@ -169,9 +169,15 @@ impl CommentSynthesizer {
 
     fn determine_category(content: &str) -> Category {
         let lower = content.to_lowercase();
-        if lower.contains("security") || lower.contains("vulnerability") || lower.contains("injection") {
+        if lower.contains("security")
+            || lower.contains("vulnerability")
+            || lower.contains("injection")
+        {
             Category::Security
-        } else if lower.contains("performance") || lower.contains("optimization") || lower.contains("slow") {
+        } else if lower.contains("performance")
+            || lower.contains("optimization")
+            || lower.contains("slow")
+        {
             Category::Performance
         } else if lower.contains("bug") || lower.contains("fix") || lower.contains("error") {
             Category::Bug
@@ -181,9 +187,15 @@ impl CommentSynthesizer {
             Category::Documentation
         } else if lower.contains("test") || lower.contains("coverage") {
             Category::Testing
-        } else if lower.contains("maintain") || lower.contains("complex") || lower.contains("readable") {
+        } else if lower.contains("maintain")
+            || lower.contains("complex")
+            || lower.contains("readable")
+        {
             Category::Maintainability
-        } else if lower.contains("design") || lower.contains("architecture") || lower.contains("pattern") {
+        } else if lower.contains("design")
+            || lower.contains("architecture")
+            || lower.contains("pattern")
+        {
             Category::Architecture
         } else {
             Category::BestPractice
@@ -192,7 +204,7 @@ impl CommentSynthesizer {
 
     fn calculate_confidence(content: &str, severity: &Severity, _category: &Category) -> f32 {
         let mut confidence: f32 = 0.7; // Base confidence
-        
+
         // Boost confidence for specific patterns
         let lower = content.to_lowercase();
         if lower.contains("sql injection") || lower.contains("xss") || lower.contains("csrf") {
@@ -204,14 +216,14 @@ impl CommentSynthesizer {
         if lower.contains("performance issue") || lower.contains("n+1") {
             confidence += 0.15;
         }
-        
+
         // Adjust based on severity
         match severity {
             Severity::Error => confidence += 0.1,
             Severity::Warning => confidence += 0.05,
             _ => {}
         }
-        
+
         // Ensure confidence stays in bounds
         confidence.min(1.0).max(0.1)
     }
@@ -219,51 +231,77 @@ impl CommentSynthesizer {
     fn extract_tags(content: &str, category: &Category) -> Vec<String> {
         let mut tags = vec![format!("{:?}", category).to_lowercase()];
         let lower = content.to_lowercase();
-        
+
         // Security-specific tags
-        if lower.contains("sql") { tags.push("sql".to_string()); }
-        if lower.contains("injection") { tags.push("injection".to_string()); }
-        if lower.contains("xss") { tags.push("xss".to_string()); }
-        if lower.contains("csrf") { tags.push("csrf".to_string()); }
-        if lower.contains("auth") { tags.push("authentication".to_string()); }
-        
+        if lower.contains("sql") {
+            tags.push("sql".to_string());
+        }
+        if lower.contains("injection") {
+            tags.push("injection".to_string());
+        }
+        if lower.contains("xss") {
+            tags.push("xss".to_string());
+        }
+        if lower.contains("csrf") {
+            tags.push("csrf".to_string());
+        }
+        if lower.contains("auth") {
+            tags.push("authentication".to_string());
+        }
+
         // Performance tags
-        if lower.contains("n+1") { tags.push("n+1-query".to_string()); }
-        if lower.contains("memory") { tags.push("memory".to_string()); }
-        if lower.contains("cache") { tags.push("caching".to_string()); }
-        
+        if lower.contains("n+1") {
+            tags.push("n+1-query".to_string());
+        }
+        if lower.contains("memory") {
+            tags.push("memory".to_string());
+        }
+        if lower.contains("cache") {
+            tags.push("caching".to_string());
+        }
+
         // Code quality tags
-        if lower.contains("duplicate") { tags.push("duplication".to_string()); }
-        if lower.contains("complex") { tags.push("complexity".to_string()); }
-        if lower.contains("deprecated") { tags.push("deprecated".to_string()); }
-        
+        if lower.contains("duplicate") {
+            tags.push("duplication".to_string());
+        }
+        if lower.contains("complex") {
+            tags.push("complexity".to_string());
+        }
+        if lower.contains("deprecated") {
+            tags.push("deprecated".to_string());
+        }
+
         tags
     }
 
     fn determine_fix_effort(content: &str, category: &Category) -> FixEffort {
         let lower = content.to_lowercase();
-        
+
         // High effort indicators
-        if lower.contains("architecture") || lower.contains("refactor") || lower.contains("redesign") {
+        if lower.contains("architecture")
+            || lower.contains("refactor")
+            || lower.contains("redesign")
+        {
             return FixEffort::High;
         }
-        
+
         // Security issues often require careful consideration
-        if matches!(category, Category::Security) && 
-           (lower.contains("injection") || lower.contains("vulnerability")) {
+        if matches!(category, Category::Security)
+            && (lower.contains("injection") || lower.contains("vulnerability"))
+        {
             return FixEffort::Medium;
         }
-        
+
         // Performance issues might need investigation
         if matches!(category, Category::Performance) && lower.contains("n+1") {
             return FixEffort::Medium;
         }
-        
+
         // Style and documentation are usually quick fixes
         if matches!(category, Category::Style | Category::Documentation) {
             return FixEffort::Low;
         }
-        
+
         FixEffort::Medium
     }
 
@@ -287,7 +325,7 @@ impl CommentSynthesizer {
         if comments.is_empty() {
             return 10.0;
         }
-        
+
         let mut score: f32 = 10.0;
         for comment in comments {
             let penalty = match comment.severity {
@@ -298,7 +336,7 @@ impl CommentSynthesizer {
             };
             score -= penalty;
         }
-        
+
         score.max(0.0).min(10.0)
     }
 
@@ -307,7 +345,7 @@ impl CommentSynthesizer {
         let mut security_count = 0;
         let mut performance_count = 0;
         let mut style_count = 0;
-        
+
         for comment in comments {
             match comment.category {
                 Category::Security => security_count += 1,
@@ -316,30 +354,36 @@ impl CommentSynthesizer {
                 _ => {}
             }
         }
-        
+
         if security_count > 0 {
-            recommendations.push(format!("Address {} security issue(s) immediately", security_count));
+            recommendations.push(format!(
+                "Address {} security issue(s) immediately",
+                security_count
+            ));
         }
         if performance_count > 2 {
-            recommendations.push("Consider a performance audit - multiple optimization opportunities found".to_string());
+            recommendations.push(
+                "Consider a performance audit - multiple optimization opportunities found"
+                    .to_string(),
+            );
         }
         if style_count > 5 {
-            recommendations.push("Consider setting up automated linting to catch style issues".to_string());
+            recommendations
+                .push("Consider setting up automated linting to catch style issues".to_string());
         }
-        
+
         recommendations
     }
 
     fn deduplicate_comments(comments: &mut Vec<Comment>) {
         comments.sort_by(|a, b| {
-            a.file_path.cmp(&b.file_path)
+            a.file_path
+                .cmp(&b.file_path)
                 .then(a.line_number.cmp(&b.line_number))
                 .then(a.content.cmp(&b.content))
         });
         comments.dedup_by(|a, b| {
-            a.file_path == b.file_path && 
-            a.line_number == b.line_number && 
-            a.content == b.content
+            a.file_path == b.file_path && a.line_number == b.line_number && a.content == b.content
         });
     }
 
@@ -362,7 +406,12 @@ impl CommentSynthesizer {
                 Category::Testing => 7,
                 Category::Architecture => 8,
             };
-            (severity_priority, category_priority, c.file_path.clone(), c.line_number)
+            (
+                severity_priority,
+                category_priority,
+                c.file_path.clone(),
+                c.line_number,
+            )
         });
     }
 }

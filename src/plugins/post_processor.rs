@@ -1,6 +1,6 @@
+use crate::core::Comment;
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::core::Comment;
 
 #[async_trait]
 pub trait PostProcessor: Send + Sync {

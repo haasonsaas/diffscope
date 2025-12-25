@@ -1,4 +1,3 @@
-
 pub struct CommitPromptBuilder;
 
 impl CommitPromptBuilder {
@@ -25,7 +24,8 @@ Requirements:
 - Don't end with a period
 - Be specific about WHAT changed and WHY"#;
 
-        let user_prompt = format!(r#"<task>
+        let user_prompt = format!(
+            r#"<task>
 Analyze the following git diff and suggest a commit message. First, analyze the changes to understand what was modified, then generate an appropriate commit message.
 </task>
 
@@ -57,7 +57,9 @@ Commit: docs: update installation instructions for v2.0
    - What is the primary purpose of these changes?
 
 2. Then provide your commit message in <commit> tags.
-</instructions>"#, diff);
+</instructions>"#,
+            diff
+        );
 
         (system_prompt.to_string(), user_prompt)
     }
@@ -70,17 +72,17 @@ Commit: docs: update installation instructions for v2.0
                 return commit.to_string();
             }
         }
-        
+
         // Fallback: take the last non-empty line that looks like a commit message
         response
             .lines()
             .rev()
             .find(|line| {
                 let trimmed = line.trim();
-                !trimmed.is_empty() && 
-                !trimmed.starts_with('<') &&
-                !trimmed.contains("commit message") &&
-                trimmed.len() < 100
+                !trimmed.is_empty()
+                    && !trimmed.starts_with('<')
+                    && !trimmed.contains("commit message")
+                    && trimmed.len() < 100
             })
             .unwrap_or("")
             .trim()
@@ -90,7 +92,8 @@ Commit: docs: update installation instructions for v2.0
     pub fn build_pr_title_prompt(diff: &str) -> (String, String) {
         let system_prompt = r#"You are an expert at writing clear, descriptive pull request titles. Your role is to analyze code changes and create concise PR titles that communicate the primary purpose of the changes."#;
 
-        let user_prompt = format!(r#"<task>
+        let user_prompt = format!(
+            r#"<task>
 Analyze the following git diff and suggest a pull request title.
 </task>
 
@@ -125,7 +128,9 @@ Title: Optimize database queries for 3x faster loading
 
 <instructions>
 Analyze the changes and provide a PR title in <title> tags.
-</instructions>"#, diff);
+</instructions>"#,
+            diff
+        );
 
         (system_prompt.to_string(), user_prompt)
     }

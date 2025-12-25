@@ -1,5 +1,5 @@
+use crate::core::{LLMContextChunk, UnifiedDiff};
 use anyhow::Result;
-use crate::core::{UnifiedDiff, LLMContextChunk};
 
 pub struct SmartReviewPromptBuilder;
 
@@ -10,7 +10,7 @@ impl SmartReviewPromptBuilder {
     ) -> Result<(String, String)> {
         let system_prompt = Self::build_smart_review_system_prompt();
         let user_prompt = Self::build_smart_review_user_prompt(diff, context_chunks)?;
-        
+
         Ok((system_prompt, user_prompt))
     }
 
@@ -74,67 +74,87 @@ TAGS: [comma-separated relevant tags]
         context_chunks: &[LLMContextChunk],
     ) -> Result<String> {
         let mut prompt = String::new();
-        
-        prompt.push_str(&format!("Please review the following code changes in file: {}\n\n", 
-            diff.file_path.display()));
-        
+
+        prompt.push_str(&format!(
+            "Please review the following code changes in file: {}\n\n",
+            diff.file_path.display()
+        ));
+
         // Add context information
         if !context_chunks.is_empty() {
             prompt.push_str("## Context Information\n\n");
             for chunk in context_chunks {
                 let (start_line, end_line) = chunk.line_range.unwrap_or((1, 1));
-                let description = format!("{} - {}", chunk.file_path.display(), format!("{:?}", chunk.context_type));
-                prompt.push_str(&format!("**{}** (lines {}-{}):\n```\n{}\n```\n\n",
-                    description, 
-                    start_line, 
+                let description = format!(
+                    "{} - {}",
+                    chunk.file_path.display(),
+                    format!("{:?}", chunk.context_type)
+                );
+                prompt.push_str(&format!(
+                    "**{}** (lines {}-{}):\n```\n{}\n```\n\n",
+                    description,
+                    start_line,
                     end_line,
-                    chunk.content.lines().take(20).collect::<Vec<_>>().join("\n")
+                    chunk
+                        .content
+                        .lines()
+                        .take(20)
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 ));
             }
         }
-        
+
         prompt.push_str("## Code Changes\n\n");
-        
+
         // Format the diff with line numbers and change indicators
         for hunk in &diff.hunks {
-            prompt.push_str(&format!("### Hunk: Lines {}-{} (was {}-{})\n\n",
-                hunk.new_start, 
+            prompt.push_str(&format!(
+                "### Hunk: Lines {}-{} (was {}-{})\n\n",
+                hunk.new_start,
                 hunk.new_start + hunk.new_lines,
                 hunk.old_start,
                 hunk.old_start + hunk.old_lines
             ));
-            
+
             prompt.push_str("```diff\n");
             let mut line_num = hunk.new_start;
-            
+
             for line in &hunk.changes {
                 let prefix = match line.change_type {
                     crate::core::diff_parser::ChangeType::Added => "+",
-                    crate::core::diff_parser::ChangeType::Removed => "-", 
+                    crate::core::diff_parser::ChangeType::Removed => "-",
                     crate::core::diff_parser::ChangeType::Context => " ",
                 };
-                
+
                 prompt.push_str(&format!("{}{:4} {}\n", prefix, line_num, line.content));
-                
-                if !matches!(line.change_type, crate::core::diff_parser::ChangeType::Removed) {
+
+                if !matches!(
+                    line.change_type,
+                    crate::core::diff_parser::ChangeType::Removed
+                ) {
                     line_num += 1;
                 }
             }
-            
+
             prompt.push_str("```\n\n");
         }
-        
+
         prompt.push_str("## Review Instructions\n\n");
         prompt.push_str("Please analyze the code changes for:\n");
-        prompt.push_str("1. Security vulnerabilities (SQL injection, XSS, authentication bypass, etc.)\n");
-        prompt.push_str("2. Performance issues (N+1 queries, inefficient algorithms, memory leaks)\n");
+        prompt.push_str(
+            "1. Security vulnerabilities (SQL injection, XSS, authentication bypass, etc.)\n",
+        );
+        prompt.push_str(
+            "2. Performance issues (N+1 queries, inefficient algorithms, memory leaks)\n",
+        );
         prompt.push_str("3. Bugs and edge cases (null pointers, race conditions, logic errors)\n");
         prompt.push_str("4. Maintainability concerns (complexity, readability, error handling)\n");
         prompt.push_str("5. Testing gaps (missing tests, poor test quality)\n");
         prompt.push_str("6. Best practice violations (naming, patterns, architecture)\n\n");
-        
+
         prompt.push_str("Focus on the most impactful issues. Provide specific, actionable suggestions with code examples where helpful.\n");
-        
+
         Ok(prompt)
     }
 }

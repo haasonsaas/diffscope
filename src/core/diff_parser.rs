@@ -63,7 +63,11 @@ impl DiffParser {
         Ok(diffs)
     }
 
-    pub fn parse_text_diff(old_content: &str, new_content: &str, file_path: PathBuf) -> Result<UnifiedDiff> {
+    pub fn parse_text_diff(
+        old_content: &str,
+        new_content: &str,
+        file_path: PathBuf,
+    ) -> Result<UnifiedDiff> {
         let diff = TextDiff::from_lines(old_content, new_content);
         let mut hunks = Vec::new();
 
@@ -157,9 +161,13 @@ impl DiffParser {
                     old_lines: old_count,
                     new_start: new_start.unwrap_or(1),
                     new_lines: new_count,
-                    context: format!("@@ -{},{} +{},{} @@", 
-                        old_start.unwrap_or(1), old_count,
-                        new_start.unwrap_or(1), new_count),
+                    context: format!(
+                        "@@ -{},{} +{},{} @@",
+                        old_start.unwrap_or(1),
+                        old_count,
+                        new_start.unwrap_or(1),
+                        new_count
+                    ),
                     changes: hunk_lines,
                 });
             }
@@ -180,7 +188,10 @@ impl DiffParser {
         *i += 1;
 
         let mut is_binary = false;
-        while *i < lines.len() && !lines[*i].starts_with("@@") && !lines[*i].starts_with("diff --git") {
+        while *i < lines.len()
+            && !lines[*i].starts_with("@@")
+            && !lines[*i].starts_with("diff --git")
+        {
             if lines[*i].starts_with("Binary files") || lines[*i].starts_with("GIT binary patch") {
                 is_binary = true;
             }
@@ -188,7 +199,7 @@ impl DiffParser {
         }
 
         let mut hunks = Vec::new();
-        
+
         while *i < lines.len() && lines[*i].starts_with("@@") {
             let hunk = Self::parse_hunk(lines, i)?;
             hunks.push(hunk);
@@ -262,7 +273,10 @@ impl DiffParser {
             .ok_or_else(|| anyhow::anyhow!("Invalid file header: {}", line))?
             .trim();
         let path = raw.split_whitespace().next().unwrap_or(raw);
-        Ok(path.trim_start_matches("a/").trim_start_matches("b/").to_string())
+        Ok(path
+            .trim_start_matches("a/")
+            .trim_start_matches("b/")
+            .to_string())
     }
 
     fn parse_hunk(lines: &[&str], i: &mut usize) -> Result<DiffHunk> {
@@ -344,7 +358,8 @@ impl DiffParser {
 
     fn parse_hunk_header(header: &str) -> Result<(usize, usize, usize, usize)> {
         let re = regex::Regex::new(r"@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@")?;
-        let caps = re.captures(header)
+        let caps = re
+            .captures(header)
             .ok_or_else(|| anyhow::anyhow!("Invalid hunk header: {}", header))?;
 
         let old_start = caps.get(1).unwrap().as_str().parse()?;
@@ -364,9 +379,9 @@ mod tests {
     fn test_parse_text_diff() {
         let old = "line1\nline2\nline3";
         let new = "line1\nmodified\nline3\nline4";
-        
+
         let diff = DiffParser::parse_text_diff(old, new, PathBuf::from("test.txt")).unwrap();
-        
+
         assert_eq!(diff.file_path, PathBuf::from("test.txt"));
         assert!(!diff.hunks.is_empty());
     }

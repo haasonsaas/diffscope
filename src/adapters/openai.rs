@@ -1,10 +1,10 @@
+use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
-use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 
 pub struct OpenAIAdapter {
     client: Client,
@@ -51,14 +51,16 @@ impl OpenAIAdapter {
         let api_key = config.api_key.clone()
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .context("OpenAI API key not found. Set OPENAI_API_KEY environment variable or provide in config")?;
-        
-        let base_url = config.base_url.clone()
+
+        let base_url = config
+            .base_url
+            .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-        
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
-        
+
         Ok(Self {
             client,
             config,
@@ -117,33 +119,37 @@ impl LLMAdapter for OpenAIAdapter {
                 content: request.user_prompt,
             },
         ];
-        
+
         let openai_request = OpenAIRequest {
             model: self.config.model_name.clone(),
             messages,
             temperature: request.temperature.unwrap_or(self.config.temperature),
             max_tokens: request.max_tokens.unwrap_or(self.config.max_tokens),
         };
-        
+
         let url = format!("{}/chat/completions", self.base_url);
-        let response = self.send_with_retry(|| {
-            self.client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(&openai_request)
-        })
-        .await
-        .context("Failed to send request to OpenAI")?;
-        
-        let openai_response: OpenAIResponse = response.json().await
+        let response = self
+            .send_with_retry(|| {
+                self.client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", self.api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&openai_request)
+            })
+            .await
+            .context("Failed to send request to OpenAI")?;
+
+        let openai_response: OpenAIResponse = response
+            .json()
+            .await
             .context("Failed to parse OpenAI response")?;
-        
-        let content = openai_response.choices
+
+        let content = openai_response
+            .choices
             .first()
             .map(|c| c.message.content.clone())
             .unwrap_or_default();
-        
+
         Ok(LLMResponse {
             content,
             model: openai_response.model,
@@ -154,7 +160,7 @@ impl LLMAdapter for OpenAIAdapter {
             }),
         })
     }
-    
+
     fn _model_name(&self) -> &str {
         &self.config.model_name
     }
