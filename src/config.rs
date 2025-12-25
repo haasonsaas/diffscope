@@ -29,6 +29,27 @@ pub struct Config {
     #[serde(default)]
     pub review_instructions: Option<String>,
 
+    #[serde(default = "default_true")]
+    pub smart_review_summary: bool,
+
+    #[serde(default)]
+    pub smart_review_diagram: bool,
+
+    #[serde(default = "default_true")]
+    pub symbol_index: bool,
+
+    #[serde(default = "default_symbol_index_max_files")]
+    pub symbol_index_max_files: usize,
+
+    #[serde(default = "default_symbol_index_max_bytes")]
+    pub symbol_index_max_bytes: usize,
+
+    #[serde(default = "default_symbol_index_max_locations")]
+    pub symbol_index_max_locations: usize,
+
+    #[serde(default = "default_feedback_path")]
+    pub feedback_path: PathBuf,
+
     pub system_prompt: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -101,6 +122,13 @@ impl Default for Config {
             min_confidence: default_min_confidence(),
             review_profile: None,
             review_instructions: None,
+            smart_review_summary: true,
+            smart_review_diagram: false,
+            symbol_index: true,
+            symbol_index_max_files: default_symbol_index_max_files(),
+            symbol_index_max_bytes: default_symbol_index_max_bytes(),
+            symbol_index_max_locations: default_symbol_index_max_locations(),
+            feedback_path: default_feedback_path(),
             system_prompt: None,
             api_key: None,
             base_url: None,
@@ -164,6 +192,16 @@ impl Config {
 
         if self.max_tokens == 0 {
             self.max_tokens = default_max_tokens();
+        }
+
+        if self.symbol_index_max_files == 0 {
+            self.symbol_index_max_files = default_symbol_index_max_files();
+        }
+        if self.symbol_index_max_bytes == 0 {
+            self.symbol_index_max_bytes = default_symbol_index_max_bytes();
+        }
+        if self.symbol_index_max_locations == 0 {
+            self.symbol_index_max_locations = default_symbol_index_max_locations();
         }
 
         if !self.min_confidence.is_finite() {
@@ -290,6 +328,22 @@ fn default_max_diff_chars() -> usize {
 
 fn default_min_confidence() -> f32 {
     0.0
+}
+
+fn default_symbol_index_max_files() -> usize {
+    500
+}
+
+fn default_symbol_index_max_bytes() -> usize {
+    200_000
+}
+
+fn default_symbol_index_max_locations() -> usize {
+    5
+}
+
+fn default_feedback_path() -> PathBuf {
+    PathBuf::from(".diffscope.feedback.json")
 }
 
 fn default_true() -> bool {

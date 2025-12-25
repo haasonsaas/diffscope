@@ -196,6 +196,13 @@ min_confidence: 0.0       # Drop comments below this confidence (0.0-1.0)
 review_profile: balanced  # balanced | chill | assertive
 review_instructions: |
   Prioritize security and correctness issues. Avoid stylistic comments unless they impact maintainability.
+smart_review_summary: true   # Include AI-generated PR summary in smart-review output
+smart_review_diagram: false  # Include Mermaid diagram in PR summary (smart-review)
+symbol_index: true           # Build repo symbol index for cross-file context
+symbol_index_max_files: 500
+symbol_index_max_bytes: 200000
+symbol_index_max_locations: 5
+feedback_path: ".diffscope.feedback.json"
 system_prompt: "Focus on security vulnerabilities, performance issues, and best practices"
 openai_use_responses: true  # Use OpenAI Responses API (recommended) instead of chat completions
 
@@ -273,6 +280,25 @@ Apache-2.0 License. See [LICENSE](LICENSE) for details.
 📝 **Total Issues Found:** 4
 🚨 **Critical Issues:** 1
 📁 **Files Analyzed:** 3
+
+## 🧾 PR Summary
+
+**Add auth safeguards** (Fix)
+
+### Key Changes
+
+- Harden auth query handling
+- Add route-level guards
+- Introduce safe defaults for user lookups
+
+### Diagram
+
+```mermaid
+flowchart TD
+  A[Request] --> B[Auth Guard]
+  B --> C[DB Query]
+  C --> D[Response]
+```
 
 ## 🧭 Change Walkthrough
 
@@ -413,6 +439,9 @@ temperature: 0.1  # Low for consistent reviews
 max_tokens: 4000
 min_confidence: 0.2
 review_profile: assertive
+smart_review_summary: true
+smart_review_diagram: true
+symbol_index: true
 
 system_prompt: |
   You are reviewing Python code for a production FastAPI application.
@@ -606,6 +635,20 @@ Planned support for responding to pull request comments with interactive command
 @diffscope generate tests         # Generate unit tests
 @diffscope help                   # Show all commands
 ```
+
+### ✅ Feedback Loop (Reduce Repeated False Positives)
+
+Use the feedback store to suppress comments you’ve already reviewed:
+
+```bash
+# Reject comments from a prior JSON review output
+diffscope feedback --reject review.json
+
+# Accept comments (keeps a record, and removes them from suppress list)
+diffscope feedback --accept review.json
+```
+
+The feedback file defaults to `.diffscope.feedback.json` and can be configured in `.diffscope.yml`.
 
 ### 📊 PR Summary Generation
 

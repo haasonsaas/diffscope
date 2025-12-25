@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
+    #[serde(default)]
+    pub id: String,
     pub file_path: PathBuf,
     pub line_number: usize,
     pub content: String,
@@ -139,8 +141,10 @@ impl CommentSynthesizer {
             .clone()
             .unwrap_or_else(|| Self::determine_fix_effort(&raw.content, &category));
         let code_suggestion = Self::generate_code_suggestion(&raw);
+        let id = Self::generate_comment_id(&raw.file_path, &raw.content, &category);
 
         Ok(Some(Comment {
+            id,
             file_path: raw.file_path,
             line_number: raw.line_number,
             content: raw.content,
@@ -152,6 +156,10 @@ impl CommentSynthesizer {
             tags,
             fix_effort,
         }))
+    }
+
+    fn generate_comment_id(file_path: &PathBuf, content: &str, category: &Category) -> String {
+        compute_comment_id(file_path, content, category)
     }
 
     fn determine_severity(content: &str) -> Severity {
@@ -414,6 +422,47 @@ impl CommentSynthesizer {
             )
         });
     }
+}
+
+pub fn compute_comment_id(file_path: &PathBuf, content: &str, category: &Category) -> String {
+    let normalized = normalize_content(content);
+    let key = format!("{}|{:?}|{}", file_path.display(), category, normalized);
+    let hash = fnv1a64(key.as_bytes());
+    format!("cmt_{:016x}", hash)
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn normalize_content(content: &str) -> String {
+    let mut normalized = String::new();
+    let mut last_space = false;
+
+    for ch in content.chars() {
+        let ch = if ch.is_ascii_digit() {
+            '#'
+        } else {
+            ch.to_ascii_lowercase()
+        };
+
+        if ch.is_whitespace() {
+            if !last_space {
+                normalized.push(' ');
+                last_space = true;
+            }
+        } else {
+            normalized.push(ch);
+            last_space = false;
+        }
+    }
+
+    normalized.trim().to_string()
 }
 
 #[derive(Debug)]

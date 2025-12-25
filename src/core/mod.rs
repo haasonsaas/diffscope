@@ -8,6 +8,7 @@ pub mod interactive;
 pub mod pr_summary;
 pub mod prompt;
 pub mod smart_review_prompt;
+pub mod symbol_index;
 
 pub use changelog::ChangelogGenerator;
 pub use comment::{Comment, CommentSynthesizer};
@@ -15,6 +16,7 @@ pub use commit_prompt::CommitPromptBuilder;
 pub use context::{ContextFetcher, ContextType, LLMContextChunk};
 pub use diff_parser::{DiffParser, UnifiedDiff};
 pub use git::GitIntegration;
-pub use pr_summary::PRSummaryGenerator;
+pub use pr_summary::{PRSummaryGenerator, SummaryOptions};
 pub use prompt::PromptBuilder;
 pub use smart_review_prompt::SmartReviewPromptBuilder;
+pub use symbol_index::SymbolIndex;

@@ -7,9 +7,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -117,6 +119,24 @@ enum Commands {
         )]
         output: Option<PathBuf>,
     },
+    Feedback {
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "Mark review JSON comments as accepted"
+        )]
+        accept: Option<PathBuf>,
+
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "Mark review JSON comments as rejected"
+        )]
+        reject: Option<PathBuf>,
+
+        #[arg(long, help = "Override feedback file path")]
+        feedback_path: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -210,6 +230,13 @@ async fn main() -> Result<()> {
         } => {
             changelog_command(from, to, release, output).await?;
         }
+        Commands::Feedback {
+            accept,
+            reject,
+            feedback_path,
+        } => {
+            feedback_command(config, accept, reject, feedback_path).await?;
+        }
     }
 
     Ok(())
@@ -233,6 +260,7 @@ async fn review_command(
 
     let mut plugin_manager = plugins::plugin::PluginManager::new();
     plugin_manager.load_builtin_plugins(&config.plugins).await?;
+    let feedback = load_feedback_store(&config);
 
     let diff_content = if let Some(path) = diff_path {
         tokio::fs::read_to_string(path).await?
@@ -257,6 +285,7 @@ async fn review_command(
 
     let diffs = core::DiffParser::parse_unified_diff(&diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
+    let symbol_index = build_symbol_index(&config, &repo_root);
     let model_config = adapters::llm::ModelConfig {
         model_name: config.model.clone(),
         api_key: config.api_key.clone(),
@@ -311,6 +340,17 @@ async fn review_command(
                 .fetch_related_definitions(&diff.file_path, &symbols)
                 .await?;
             context_chunks.extend(definition_chunks);
+            if let Some(index) = &symbol_index {
+                let index_chunks = context_fetcher
+                    .fetch_related_definitions_with_index(
+                        &diff.file_path,
+                        &symbols,
+                        index,
+                        config.symbol_index_max_locations,
+                    )
+                    .await?;
+                context_chunks.extend(index_chunks);
+            }
         }
 
         // Get path-specific configuration
@@ -394,6 +434,9 @@ async fn review_command(
         .run_post_processors(all_comments, &repo_path_str)
         .await?;
     let processed_comments = apply_confidence_threshold(processed_comments, config.min_confidence);
+    let processed_comments = apply_feedback_suppression(processed_comments, &feedback);
+    let processed_comments = apply_feedback_suppression(processed_comments, &feedback);
+    let processed_comments = apply_feedback_suppression(processed_comments, &feedback);
 
     let effective_format = if patch { OutputFormat::Patch } else { format };
     output_comments(&processed_comments, output_path, effective_format).await?;
@@ -775,6 +818,7 @@ async fn review_diff_content_raw(
 ) -> Result<Vec<core::Comment>> {
     let diffs = core::DiffParser::parse_unified_diff(diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
+    let symbol_index = build_symbol_index(&config, repo_path);
 
     // Initialize plugin manager and load builtin plugins
     let mut plugin_manager = plugins::plugin::PluginManager::new();
@@ -837,6 +881,17 @@ async fn review_diff_content_raw(
                 .fetch_related_definitions(&diff.file_path, &symbols)
                 .await?;
             context_chunks.extend(definition_chunks);
+            if let Some(index) = &symbol_index {
+                let index_chunks = context_fetcher
+                    .fetch_related_definitions_with_index(
+                        &diff.file_path,
+                        &symbols,
+                        index,
+                        config.symbol_index_max_locations,
+                    )
+                    .await?;
+                context_chunks.extend(index_chunks);
+            }
         }
 
         // Get path-specific configuration
@@ -1227,6 +1282,7 @@ async fn smart_review_command(
     let diffs = core::DiffParser::parse_unified_diff(&diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
     let walkthrough = build_change_walkthrough(&diffs);
+    let symbol_index = build_symbol_index(&config, &repo_root);
 
     let model_config = adapters::llm::ModelConfig {
         model_name: config.model.clone(),
@@ -1239,6 +1295,32 @@ async fn smart_review_command(
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
     let mut all_comments = Vec::new();
+    let pr_summary = if config.smart_review_summary {
+        match core::GitIntegration::new(&repo_root) {
+            Ok(git) => {
+                let options = core::SummaryOptions {
+                    include_diagram: config.smart_review_diagram,
+                };
+                match core::PRSummaryGenerator::generate_summary_with_options(
+                    &diffs, &git, &adapter, options,
+                )
+                .await
+                {
+                    Ok(summary) => Some(summary),
+                    Err(err) => {
+                        warn!("PR summary generation failed: {}", err);
+                        None
+                    }
+                }
+            }
+            Err(err) => {
+                warn!("Skipping PR summary (git unavailable): {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     for diff in &diffs {
         // Check if file should be excluded
@@ -1301,6 +1383,17 @@ async fn smart_review_command(
                 .fetch_related_definitions(&diff.file_path, &symbols)
                 .await?;
             context_chunks.extend(definition_chunks);
+            if let Some(index) = &symbol_index {
+                let index_chunks = context_fetcher
+                    .fetch_related_definitions_with_index(
+                        &diff.file_path,
+                        &symbols,
+                        index,
+                        config.symbol_index_max_locations,
+                    )
+                    .await?;
+                context_chunks.extend(index_chunks);
+            }
         }
 
         let guidance = build_review_guidance(&config, path_config);
@@ -1357,7 +1450,12 @@ async fn smart_review_command(
 
     // Generate summary and output results
     let summary = core::CommentSynthesizer::generate_summary(&processed_comments);
-    let output = format_smart_review_output(&processed_comments, &summary, &walkthrough);
+    let output = format_smart_review_output(
+        &processed_comments,
+        &summary,
+        pr_summary.as_ref(),
+        &walkthrough,
+    );
 
     if let Some(path) = output_path {
         tokio::fs::write(path, output).await?;
@@ -1552,6 +1650,7 @@ fn parse_smart_tags(value: &str) -> Vec<String> {
 fn format_smart_review_output(
     comments: &[core::Comment],
     summary: &core::comment::ReviewSummary,
+    pr_summary: Option<&core::pr_summary::PRSummary>,
     walkthrough: &str,
 ) -> String {
     let mut output = String::new();
@@ -1583,6 +1682,11 @@ fn format_smart_review_output(
         "📁 **Files Analyzed:** {}\n\n",
         summary.files_reviewed
     ));
+
+    if let Some(pr_summary) = pr_summary {
+        output.push_str(&format_pr_summary_section(pr_summary));
+        output.push('\n');
+    }
 
     if !walkthrough.trim().is_empty() {
         output.push_str(walkthrough);
@@ -1781,6 +1885,64 @@ async fn changelog_command(
     Ok(())
 }
 
+async fn feedback_command(
+    config: config::Config,
+    accept: Option<PathBuf>,
+    reject: Option<PathBuf>,
+    feedback_path: Option<PathBuf>,
+) -> Result<()> {
+    let (action, input_path) = match (accept, reject) {
+        (Some(path), None) => ("accept", path),
+        (None, Some(path)) => ("reject", path),
+        _ => {
+            anyhow::bail!("Specify exactly one of --accept or --reject");
+        }
+    };
+
+    let feedback_path = feedback_path.unwrap_or_else(|| config.feedback_path.clone());
+    let content = tokio::fs::read_to_string(&input_path).await?;
+    let mut comments: Vec<core::Comment> = serde_json::from_str(&content)?;
+
+    for comment in &mut comments {
+        if comment.id.trim().is_empty() {
+            comment.id = core::comment::compute_comment_id(
+                &comment.file_path,
+                &comment.content,
+                &comment.category,
+            );
+        }
+    }
+
+    let mut store = load_feedback_store_from_path(&feedback_path);
+    let mut updated = 0usize;
+
+    if action == "accept" {
+        for comment in &comments {
+            if store.accept.insert(comment.id.clone()) {
+                updated += 1;
+            }
+            store.suppress.remove(&comment.id);
+        }
+    } else {
+        for comment in &comments {
+            if store.suppress.insert(comment.id.clone()) {
+                updated += 1;
+            }
+            store.accept.remove(&comment.id);
+        }
+    }
+
+    save_feedback_store(&feedback_path, &store)?;
+    println!(
+        "Updated feedback store at {} ({} {} comment(s))",
+        feedback_path.display(),
+        updated,
+        action
+    );
+
+    Ok(())
+}
+
 fn extract_symbols_from_diff(diff: &core::UnifiedDiff) -> Vec<String> {
     let mut symbols = Vec::new();
     static SYMBOL_REGEX: Lazy<Regex> =
@@ -1949,6 +2111,130 @@ fn build_change_walkthrough(diffs: &[core::UnifiedDiff]) -> String {
     }
 
     output
+}
+
+fn build_symbol_index(config: &config::Config, repo_root: &Path) -> Option<core::SymbolIndex> {
+    if !config.symbol_index {
+        return None;
+    }
+
+    let should_exclude = |path: &PathBuf| config.should_exclude(path);
+    match core::SymbolIndex::build(
+        repo_root,
+        config.symbol_index_max_files,
+        config.symbol_index_max_bytes,
+        config.symbol_index_max_locations,
+        should_exclude,
+    ) {
+        Ok(index) => {
+            info!(
+                "Indexed {} symbols across {} files",
+                index.symbols_indexed(),
+                index.files_indexed()
+            );
+            Some(index)
+        }
+        Err(err) => {
+            warn!("Symbol index build failed: {}", err);
+            None
+        }
+    }
+}
+
+fn format_pr_summary_section(summary: &core::pr_summary::PRSummary) -> String {
+    let mut output = String::new();
+    output.push_str("## 🧾 PR Summary\n\n");
+    output.push_str(&format!(
+        "**{}** ({:?})\n\n",
+        summary.title, summary.change_type
+    ));
+
+    if !summary.description.is_empty() {
+        output.push_str(&format!("{}\n\n", summary.description));
+    }
+
+    if !summary.key_changes.is_empty() {
+        output.push_str("### Key Changes\n\n");
+        for change in &summary.key_changes {
+            output.push_str(&format!("- {}\n", change));
+        }
+        output.push('\n');
+    }
+
+    if let Some(breaking) = &summary.breaking_changes {
+        output.push_str("### Breaking Changes\n\n");
+        output.push_str(&format!("{}\n\n", breaking));
+    }
+
+    if !summary.testing_notes.is_empty() {
+        output.push_str("### Testing Notes\n\n");
+        output.push_str(&format!("{}\n\n", summary.testing_notes));
+    }
+
+    if let Some(diagram) = &summary.visual_diff {
+        if !diagram.trim().is_empty() {
+            output.push_str("### Diagram\n\n");
+            output.push_str("```mermaid\n");
+            output.push_str(diagram.trim());
+            output.push_str("\n```\n\n");
+        }
+    }
+
+    output
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct FeedbackStore {
+    #[serde(default)]
+    suppress: HashSet<String>,
+    #[serde(default)]
+    accept: HashSet<String>,
+}
+
+fn load_feedback_store_from_path(path: &Path) -> FeedbackStore {
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => FeedbackStore::default(),
+    }
+}
+
+fn load_feedback_store(config: &config::Config) -> FeedbackStore {
+    load_feedback_store_from_path(&config.feedback_path)
+}
+
+fn save_feedback_store(path: &Path, store: &FeedbackStore) -> Result<()> {
+    let content = serde_json::to_string_pretty(store)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+fn apply_feedback_suppression(
+    comments: Vec<core::Comment>,
+    feedback: &FeedbackStore,
+) -> Vec<core::Comment> {
+    if feedback.suppress.is_empty() {
+        return comments;
+    }
+
+    let total = comments.len();
+    let mut kept = Vec::with_capacity(total);
+
+    for comment in comments {
+        if feedback.suppress.contains(&comment.id) {
+            continue;
+        }
+        kept.push(comment);
+    }
+
+    if kept.len() != total {
+        let dropped = total.saturating_sub(kept.len());
+        info!(
+            "Dropped {} comment(s) due to feedback suppression rules",
+            dropped
+        );
+    }
+
+    kept
 }
 
 fn apply_confidence_threshold(

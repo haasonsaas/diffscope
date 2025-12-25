@@ -4,11 +4,33 @@ use anyhow::Result;
 
 pub struct PRSummaryGenerator;
 
+#[derive(Debug, Clone)]
+pub struct SummaryOptions {
+    pub include_diagram: bool,
+}
+
+impl Default for SummaryOptions {
+    fn default() -> Self {
+        Self {
+            include_diagram: false,
+        }
+    }
+}
+
 impl PRSummaryGenerator {
     pub async fn generate_summary(
         diffs: &[UnifiedDiff],
         git: &GitIntegration,
         adapter: &Box<dyn LLMAdapter>,
+    ) -> Result<PRSummary> {
+        Self::generate_summary_with_options(diffs, git, adapter, SummaryOptions::default()).await
+    }
+
+    pub async fn generate_summary_with_options(
+        diffs: &[UnifiedDiff],
+        git: &GitIntegration,
+        adapter: &Box<dyn LLMAdapter>,
+        options: SummaryOptions,
     ) -> Result<PRSummary> {
         // Get commit messages for context
         let commits = git.get_recent_commits(10)?;
@@ -17,7 +39,7 @@ impl PRSummaryGenerator {
         let stats = Self::calculate_stats(diffs);
 
         // Build prompt for AI summary
-        let prompt = Self::build_summary_prompt(diffs, &commits, &stats);
+        let prompt = Self::build_summary_prompt(diffs, &commits, &stats, &options);
 
         let request = LLMRequest {
             system_prompt: Self::get_system_prompt(),
@@ -72,6 +94,7 @@ impl PRSummaryGenerator {
         diffs: &[UnifiedDiff],
         commits: &[String],
         stats: &ChangeStats,
+        options: &SummaryOptions,
     ) -> String {
         let mut prompt = String::new();
 
@@ -122,6 +145,11 @@ impl PRSummaryGenerator {
         prompt.push_str("3. Type of change (feature/fix/refactor/docs)\n");
         prompt.push_str("4. Breaking changes (if any)\n");
         prompt.push_str("5. Testing notes\n");
+        if options.include_diagram {
+            prompt.push_str(
+                "6. A Mermaid diagram (sequence or flowchart) summarizing the change if helpful\n",
+            );
+        }
 
         prompt
     }
@@ -143,7 +171,8 @@ KEY_CHANGES:
 - [change 2]
 - [change 3]
 BREAKING_CHANGES: [none or describe]
-TESTING_NOTES: [what to test]"#
+TESTING_NOTES: [what to test]
+DIAGRAM: [optional mermaid diagram or none]"#
             .to_string()
     }
 
@@ -156,7 +185,7 @@ TESTING_NOTES: [what to test]"#
             breaking_changes: None,
             testing_notes: String::new(),
             stats,
-            _visual_diff: None,
+            visual_diff: extract_mermaid_diagram(content),
         };
 
         // Parse structured response
@@ -220,7 +249,7 @@ pub struct PRSummary {
     pub breaking_changes: Option<String>,
     pub testing_notes: String,
     pub stats: ChangeStats,
-    pub _visual_diff: Option<String>,
+    pub visual_diff: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -315,6 +344,53 @@ impl PRSummary {
             output.push_str(&format!("{}\n\n", self.testing_notes));
         }
 
+        if let Some(diagram) = &self.visual_diff {
+            if !diagram.trim().is_empty() {
+                output.push_str("## 🗺️ Change Diagram\n\n");
+                output.push_str("```mermaid\n");
+                output.push_str(diagram.trim());
+                output.push_str("\n```\n\n");
+            }
+        }
+
         output
     }
+}
+
+fn extract_mermaid_diagram(content: &str) -> Option<String> {
+    let mut lines = content.lines().peekable();
+
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("DIAGRAM:") {
+            if trimmed.to_lowercase().contains("none") {
+                return None;
+            }
+
+            // Seek to mermaid block
+            while let Some(next_line) = lines.next() {
+                let next_trimmed = next_line.trim();
+                if next_trimmed.starts_with("```") && next_trimmed.contains("mermaid") {
+                    break;
+                }
+            }
+
+            let mut diagram_lines = Vec::new();
+            while let Some(block_line) = lines.next() {
+                let block_trimmed = block_line.trim();
+                if block_trimmed.starts_with("```") {
+                    break;
+                }
+                diagram_lines.push(block_line);
+            }
+
+            let diagram = diagram_lines.join("\n").trim().to_string();
+            if diagram.is_empty() {
+                return None;
+            }
+            return Some(diagram);
+        }
+    }
+
+    None
 }

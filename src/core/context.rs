@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::core::SymbolIndex;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LLMContextChunk {
     pub file_path: PathBuf,
@@ -170,6 +171,39 @@ impl ContextFetcher {
                             });
                         }
                     }
+                }
+            }
+        }
+
+        Ok(chunks)
+    }
+
+    pub async fn fetch_related_definitions_with_index(
+        &self,
+        file_path: &PathBuf,
+        symbols: &[String],
+        index: &SymbolIndex,
+        max_locations: usize,
+    ) -> Result<Vec<LLMContextChunk>> {
+        let mut chunks = Vec::new();
+
+        if symbols.is_empty() {
+            return Ok(chunks);
+        }
+
+        for symbol in symbols {
+            if let Some(locations) = index.lookup(symbol) {
+                for location in locations.iter().take(max_locations) {
+                    if &location.file_path == file_path {
+                        continue;
+                    }
+                    let snippet = truncate_with_notice(location.snippet.clone(), MAX_CONTEXT_CHARS);
+                    chunks.push(LLMContextChunk {
+                        file_path: location.file_path.clone(),
+                        content: snippet,
+                        context_type: ContextType::Definition,
+                        line_range: Some(location.line_range),
+                    });
                 }
             }
         }
