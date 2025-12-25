@@ -2152,6 +2152,7 @@ fn build_symbol_index(config: &config::Config, repo_root: &Path) -> Option<core:
             config.symbol_index_max_bytes,
             config.symbol_index_max_locations,
             command,
+            &config.symbol_index_lsp_languages,
             |path| config.should_exclude(path),
         ) {
             Ok(index) => Ok(index),

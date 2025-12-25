@@ -110,6 +110,7 @@ impl SymbolIndex {
         max_bytes: usize,
         max_locations: usize,
         lsp_command: &str,
+        lsp_languages: &HashMap<String, String>,
         should_exclude: F,
     ) -> Result<Self>
     where
@@ -128,7 +129,7 @@ impl SymbolIndex {
             .git_global(true)
             .build();
 
-        let mut rust_files = Vec::new();
+        let mut lsp_files: Vec<(PathBuf, String)> = Vec::new();
         let mut other_files = Vec::new();
 
         for entry in walker.flatten() {
@@ -148,20 +149,20 @@ impl SymbolIndex {
                 Some(ext) => ext,
                 None => continue,
             };
-            if extension == "rs" {
-                rust_files.push(relative);
+            if let Some(language_id) = lsp_languages.get(extension) {
+                lsp_files.push((relative, language_id.clone()));
             } else if patterns_for_extension(extension).is_some() {
                 other_files.push(relative);
             }
         }
 
         let mut files_seen = 0usize;
-        let mut fallback_rust = false;
+        let mut fallback_lsp = false;
 
-        if !rust_files.is_empty() {
+        if !lsp_files.is_empty() {
             match LspClient::spawn(lsp_command, repo_root) {
                 Ok(mut client) => {
-                    for relative in &rust_files {
+                    for (relative, language_id) in &lsp_files {
                         if files_seen >= max_files {
                             break;
                         }
@@ -175,11 +176,12 @@ impl SymbolIndex {
                                 Ok(content) => content,
                                 Err(_) => continue,
                             };
-                            if let Ok(file_added) = client.index_rust_file(
+                            if let Ok(file_added) = client.index_file(
                                 &mut index,
                                 relative,
                                 &full_path,
                                 &content,
+                                language_id,
                                 max_locations,
                             ) {
                                 if file_added {
@@ -191,15 +193,17 @@ impl SymbolIndex {
                     let _ = client.shutdown();
                 }
                 Err(_) => {
-                    fallback_rust = true;
+                    fallback_lsp = true;
                 }
             }
         }
 
-        for relative in other_files
-            .into_iter()
-            .chain(rust_files.into_iter().filter(|_| fallback_rust))
-        {
+        for relative in other_files.into_iter().chain(
+            lsp_files
+                .into_iter()
+                .filter(|_| fallback_lsp)
+                .map(|(path, _)| path),
+        ) {
             if files_seen >= max_files {
                 break;
             }
@@ -417,7 +421,13 @@ struct LspClient {
 
 impl LspClient {
     fn spawn(command: &str, root: &Path) -> Result<Self> {
-        let mut child = Command::new(command)
+        let mut parts = command.split_whitespace();
+        let program = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Empty LSP command"))?;
+        let mut cmd = Command::new(program);
+        cmd.args(parts);
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -454,12 +464,13 @@ impl LspClient {
         Ok(client)
     }
 
-    fn index_rust_file(
+    fn index_file(
         &mut self,
         index: &mut SymbolIndex,
         relative: &PathBuf,
         full_path: &Path,
         content: &str,
+        language_id: &str,
         max_locations: usize,
     ) -> Result<bool> {
         let uri = path_to_uri(full_path)?;
@@ -468,7 +479,7 @@ impl LspClient {
             json!({
                 "textDocument": {
                     "uri": uri,
-                    "languageId": "rust",
+                    "languageId": language_id,
                     "version": 1,
                     "text": content
                 }

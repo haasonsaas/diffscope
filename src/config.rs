@@ -53,6 +53,9 @@ pub struct Config {
     #[serde(default)]
     pub symbol_index_lsp_command: Option<String>,
 
+    #[serde(default = "default_symbol_index_lsp_languages")]
+    pub symbol_index_lsp_languages: HashMap<String, String>,
+
     #[serde(default = "default_feedback_path")]
     pub feedback_path: PathBuf,
 
@@ -136,6 +139,7 @@ impl Default for Config {
             symbol_index_max_bytes: default_symbol_index_max_bytes(),
             symbol_index_max_locations: default_symbol_index_max_locations(),
             symbol_index_lsp_command: None,
+            symbol_index_lsp_languages: default_symbol_index_lsp_languages(),
             feedback_path: default_feedback_path(),
             system_prompt: None,
             api_key: None,
@@ -223,6 +227,10 @@ impl Config {
             if command.trim().is_empty() {
                 self.symbol_index_lsp_command = None;
             }
+        }
+
+        if self.symbol_index_provider == "lsp" && self.symbol_index_lsp_languages.is_empty() {
+            self.symbol_index_lsp_languages = default_symbol_index_lsp_languages();
         }
 
         if !self.min_confidence.is_finite() {
@@ -365,6 +373,12 @@ fn default_symbol_index_max_locations() -> usize {
 
 fn default_symbol_index_provider() -> String {
     "regex".to_string()
+}
+
+fn default_symbol_index_lsp_languages() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    map.insert("rs".to_string(), "rust".to_string());
+    map
 }
 
 fn default_feedback_path() -> PathBuf {

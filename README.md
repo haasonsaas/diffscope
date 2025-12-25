@@ -201,6 +201,8 @@ smart_review_diagram: false  # Generate a Mermaid diagram in smart-review output
 symbol_index: true           # Build repo symbol index for cross-file context (respects .gitignore)
 symbol_index_provider: regex # regex | lsp
 symbol_index_lsp_command: rust-analyzer
+symbol_index_lsp_languages:
+  rs: rust
 symbol_index_max_files: 500
 symbol_index_max_bytes: 200000
 symbol_index_max_locations: 5
@@ -221,7 +223,7 @@ exclude_patterns:
   - "**/__pycache__/**"
 ```
 
-Set `symbol_index_provider: lsp` to use a language server for Rust (via `rust-analyzer`); it falls back to regex indexing if the LSP binary is missing.
+Set `symbol_index_provider: lsp` to use a language server; it falls back to regex indexing if the LSP binary is missing. Configure `symbol_index_lsp_languages` and `symbol_index_lsp_command` to match your server (for example, `typescript-language-server --stdio` with `ts`/`tsx` language IDs).
 
 ## Plugin Development
 
