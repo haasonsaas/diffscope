@@ -3,7 +3,8 @@ use ignore::WalkBuilder;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -22,7 +23,90 @@ pub struct SymbolIndex {
     files_indexed: usize,
 }
 
+struct LspServerOption {
+    command: &'static str,
+    program: &'static str,
+    extensions: &'static [&'static str],
+}
+
+const LSP_DETECT_MAX_FILES: usize = 2000;
+
+const LSP_SERVER_OPTIONS: &[LspServerOption] = &[
+    LspServerOption {
+        command: "rust-analyzer",
+        program: "rust-analyzer",
+        extensions: &["rs"],
+    },
+    LspServerOption {
+        command: "typescript-language-server --stdio",
+        program: "typescript-language-server",
+        extensions: &["ts", "tsx", "js", "jsx"],
+    },
+    LspServerOption {
+        command: "pylsp",
+        program: "pylsp",
+        extensions: &["py", "pyi"],
+    },
+    LspServerOption {
+        command: "gopls",
+        program: "gopls",
+        extensions: &["go"],
+    },
+    LspServerOption {
+        command: "jdtls",
+        program: "jdtls",
+        extensions: &["java"],
+    },
+    LspServerOption {
+        command: "kotlin-lsp",
+        program: "kotlin-lsp",
+        extensions: &["kt"],
+    },
+    LspServerOption {
+        command: "clangd",
+        program: "clangd",
+        extensions: &["c", "h", "cc", "cpp", "cxx", "hpp"],
+    },
+    LspServerOption {
+        command: "csharp-ls",
+        program: "csharp-ls",
+        extensions: &["cs"],
+    },
+    LspServerOption {
+        command: "solargraph stdio",
+        program: "solargraph",
+        extensions: &["rb"],
+    },
+    LspServerOption {
+        command: "phpactor language-server",
+        program: "phpactor",
+        extensions: &["php"],
+    },
+];
+
 impl SymbolIndex {
+    pub fn detect_lsp_command<F>(
+        repo_root: &Path,
+        max_files: usize,
+        lsp_languages: &HashMap<String, String>,
+        should_exclude: F,
+    ) -> Option<String>
+    where
+        F: Fn(&PathBuf) -> bool,
+    {
+        if max_files == 0 {
+            return None;
+        }
+        let enabled_extensions = normalized_extension_set(lsp_languages);
+        let extension_counts = collect_extension_counts(
+            repo_root,
+            max_files.min(LSP_DETECT_MAX_FILES),
+            &enabled_extensions,
+            should_exclude,
+        );
+        choose_lsp_command(&extension_counts, &enabled_extensions)
+    }
+
     pub fn build<F>(
         repo_root: &Path,
         max_files: usize,
@@ -253,6 +337,150 @@ impl SymbolIndex {
     pub fn symbols_indexed(&self) -> usize {
         self.symbols.len()
     }
+}
+
+fn normalized_extension_set(lsp_languages: &HashMap<String, String>) -> HashSet<String> {
+    lsp_languages
+        .keys()
+        .filter(|ext| !ext.trim().is_empty())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .collect()
+}
+
+fn collect_extension_counts<F>(
+    repo_root: &Path,
+    max_files: usize,
+    enabled_extensions: &HashSet<String>,
+    should_exclude: F,
+) -> HashMap<String, usize>
+where
+    F: Fn(&PathBuf) -> bool,
+{
+    let walker = WalkBuilder::new(repo_root)
+        .hidden(true)
+        .ignore(true)
+        .git_ignore(true)
+        .git_exclude(true)
+        .git_global(true)
+        .build();
+
+    let mut counts = HashMap::new();
+    let mut files_seen = 0usize;
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(repo_root)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|_| path.to_path_buf());
+        if should_exclude(&relative) {
+            continue;
+        }
+
+        files_seen += 1;
+        if files_seen > max_files {
+            break;
+        }
+
+        let extension = match path.extension().and_then(|ext| ext.to_str()) {
+            Some(ext) => ext.trim().to_ascii_lowercase(),
+            None => continue,
+        };
+        if extension.is_empty() {
+            continue;
+        }
+        if !enabled_extensions.is_empty() && !enabled_extensions.contains(&extension) {
+            continue;
+        }
+
+        *counts.entry(extension).or_insert(0) += 1;
+    }
+
+    counts
+}
+
+fn choose_lsp_command(
+    extension_counts: &HashMap<String, usize>,
+    enabled_extensions: &HashSet<String>,
+) -> Option<String> {
+    let mut best_command: Option<&'static str> = None;
+    let mut best_score = 0usize;
+
+    for option in LSP_SERVER_OPTIONS {
+        if !is_program_available(option.program) {
+            continue;
+        }
+
+        let score: usize = option
+            .extensions
+            .iter()
+            .filter(|ext| {
+                let ext: &str = *ext;
+                enabled_extensions.is_empty() || enabled_extensions.contains::<str>(ext)
+            })
+            .filter_map(|ext| {
+                let ext: &str = *ext;
+                extension_counts.get::<str>(ext)
+            })
+            .sum();
+
+        if score > best_score {
+            best_score = score;
+            best_command = Some(option.command);
+        }
+    }
+
+    best_command.map(|command| command.to_string())
+}
+
+fn is_program_available(program: &str) -> bool {
+    if program.trim().is_empty() {
+        return false;
+    }
+
+    let program_path = Path::new(program);
+    if program_path.components().count() > 1 {
+        return program_path.is_file();
+    }
+
+    let path_var = match env::var_os("PATH") {
+        Some(path) => path,
+        None => return false,
+    };
+
+    for path in env::split_paths(&path_var) {
+        if program_exists_in_dir(&path, program) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn program_exists_in_dir(dir: &Path, program: &str) -> bool {
+    let candidate = dir.join(program);
+    if candidate.is_file() {
+        return true;
+    }
+
+    if cfg!(windows) && Path::new(program).extension().is_none() {
+        let pathext = env::var_os("PATHEXT").unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".into());
+        for ext in pathext.to_string_lossy().split(';') {
+            if ext.is_empty() {
+                continue;
+            }
+            let candidate = dir.join(format!("{}{}", program, ext));
+            if candidate.is_file() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 static SYMBOL_PATTERNS: Lazy<HashMap<&'static str, Vec<Regex>>> = Lazy::new(|| {
