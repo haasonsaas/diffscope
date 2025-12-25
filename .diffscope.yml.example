@@ -14,6 +14,8 @@ review_instructions: |
 smart_review_summary: true   # Include AI-generated PR summary in smart-review output
 smart_review_diagram: false  # Generate a Mermaid diagram in smart-review output
 symbol_index: true           # Build repo symbol index for cross-file context (respects .gitignore)
+symbol_index_provider: regex # regex | lsp
+symbol_index_lsp_command: rust-analyzer
 symbol_index_max_files: 500
 symbol_index_max_bytes: 200000
 symbol_index_max_locations: 5

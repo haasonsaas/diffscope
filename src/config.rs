@@ -38,6 +38,9 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub symbol_index: bool,
 
+    #[serde(default = "default_symbol_index_provider")]
+    pub symbol_index_provider: String,
+
     #[serde(default = "default_symbol_index_max_files")]
     pub symbol_index_max_files: usize,
 
@@ -46,6 +49,9 @@ pub struct Config {
 
     #[serde(default = "default_symbol_index_max_locations")]
     pub symbol_index_max_locations: usize,
+
+    #[serde(default)]
+    pub symbol_index_lsp_command: Option<String>,
 
     #[serde(default = "default_feedback_path")]
     pub feedback_path: PathBuf,
@@ -125,9 +131,11 @@ impl Default for Config {
             smart_review_summary: true,
             smart_review_diagram: false,
             symbol_index: true,
+            symbol_index_provider: default_symbol_index_provider(),
             symbol_index_max_files: default_symbol_index_max_files(),
             symbol_index_max_bytes: default_symbol_index_max_bytes(),
             symbol_index_max_locations: default_symbol_index_max_locations(),
+            symbol_index_lsp_command: None,
             feedback_path: default_feedback_path(),
             system_prompt: None,
             api_key: None,
@@ -202,6 +210,19 @@ impl Config {
         }
         if self.symbol_index_max_locations == 0 {
             self.symbol_index_max_locations = default_symbol_index_max_locations();
+        }
+
+        let provider = self.symbol_index_provider.trim().to_lowercase();
+        if provider.is_empty() || !matches!(provider.as_str(), "regex" | "lsp") {
+            self.symbol_index_provider = default_symbol_index_provider();
+        } else {
+            self.symbol_index_provider = provider;
+        }
+
+        if let Some(command) = &self.symbol_index_lsp_command {
+            if command.trim().is_empty() {
+                self.symbol_index_lsp_command = None;
+            }
         }
 
         if !self.min_confidence.is_finite() {
@@ -340,6 +361,10 @@ fn default_symbol_index_max_bytes() -> usize {
 
 fn default_symbol_index_max_locations() -> usize {
     5
+}
+
+fn default_symbol_index_provider() -> String {
+    "regex".to_string()
 }
 
 fn default_feedback_path() -> PathBuf {

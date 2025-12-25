@@ -2140,14 +2140,43 @@ fn build_symbol_index(config: &config::Config, repo_root: &Path) -> Option<core:
         return None;
     }
 
-    let should_exclude = |path: &PathBuf| config.should_exclude(path);
-    match core::SymbolIndex::build(
-        repo_root,
-        config.symbol_index_max_files,
-        config.symbol_index_max_bytes,
-        config.symbol_index_max_locations,
-        should_exclude,
-    ) {
+    let provider = config.symbol_index_provider.as_str();
+    let result = if provider == "lsp" {
+        let command = config
+            .symbol_index_lsp_command
+            .as_deref()
+            .unwrap_or("rust-analyzer");
+        match core::SymbolIndex::build_with_lsp(
+            repo_root,
+            config.symbol_index_max_files,
+            config.symbol_index_max_bytes,
+            config.symbol_index_max_locations,
+            command,
+            |path| config.should_exclude(path),
+        ) {
+            Ok(index) => Ok(index),
+            Err(err) => {
+                warn!("LSP indexer failed (falling back to regex): {}", err);
+                core::SymbolIndex::build(
+                    repo_root,
+                    config.symbol_index_max_files,
+                    config.symbol_index_max_bytes,
+                    config.symbol_index_max_locations,
+                    |path| config.should_exclude(path),
+                )
+            }
+        }
+    } else {
+        core::SymbolIndex::build(
+            repo_root,
+            config.symbol_index_max_files,
+            config.symbol_index_max_bytes,
+            config.symbol_index_max_locations,
+            |path| config.should_exclude(path),
+        )
+    };
+
+    match result {
         Ok(index) => {
             info!(
                 "Indexed {} symbols across {} files",

@@ -199,6 +199,8 @@ review_instructions: |
 smart_review_summary: true   # Include AI-generated PR summary in smart-review output
 smart_review_diagram: false  # Generate a Mermaid diagram in smart-review output
 symbol_index: true           # Build repo symbol index for cross-file context (respects .gitignore)
+symbol_index_provider: regex # regex | lsp
+symbol_index_lsp_command: rust-analyzer
 symbol_index_max_files: 500
 symbol_index_max_bytes: 200000
 symbol_index_max_locations: 5
@@ -218,6 +220,8 @@ exclude_patterns:
   - "**/node_modules/**"
   - "**/__pycache__/**"
 ```
+
+Set `symbol_index_provider: lsp` to use a language server for Rust (via `rust-analyzer`); it falls back to regex indexing if the LSP binary is missing.
 
 ## Plugin Development
 
@@ -649,6 +653,18 @@ diffscope feedback --accept review.json
 ```
 
 The feedback file defaults to `.diffscope.feedback.json` and can be configured in `.diffscope.yml`.
+
+**CI helper (GitHub Actions):**
+
+```yaml
+- name: Update DiffScope feedback
+  if: always()
+  run: |
+    bash scripts/update_feedback_from_review.sh \
+      --action reject \
+      --input review.json \
+      --feedback .diffscope.feedback.json
+```
 
 ### 📊 PR Summary Generation
 
