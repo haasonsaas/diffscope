@@ -20,6 +20,15 @@ pub struct Config {
     #[serde(default = "default_max_diff_chars")]
     pub max_diff_chars: usize,
 
+    #[serde(default = "default_min_confidence")]
+    pub min_confidence: f32,
+
+    #[serde(default)]
+    pub review_profile: Option<String>,
+
+    #[serde(default)]
+    pub review_instructions: Option<String>,
+
     pub system_prompt: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -50,6 +59,8 @@ pub struct PathConfig {
 
     pub system_prompt: Option<String>,
 
+    pub review_instructions: Option<String>,
+
     #[serde(default)]
     pub severity_overrides: HashMap<String, String>,
 }
@@ -73,6 +84,7 @@ impl Default for PathConfig {
             ignore_patterns: Vec::new(),
             extra_context: Vec::new(),
             system_prompt: None,
+            review_instructions: None,
             severity_overrides: HashMap::new(),
         }
     }
@@ -86,6 +98,9 @@ impl Default for Config {
             max_tokens: default_max_tokens(),
             max_context_chars: default_max_context_chars(),
             max_diff_chars: default_max_diff_chars(),
+            min_confidence: default_min_confidence(),
+            review_profile: None,
+            review_instructions: None,
             system_prompt: None,
             api_key: None,
             base_url: None,
@@ -149,6 +164,29 @@ impl Config {
 
         if self.max_tokens == 0 {
             self.max_tokens = default_max_tokens();
+        }
+
+        if !self.min_confidence.is_finite() {
+            self.min_confidence = default_min_confidence();
+        } else if !(0.0..=1.0).contains(&self.min_confidence) {
+            self.min_confidence = self.min_confidence.clamp(0.0, 1.0);
+        }
+
+        if let Some(profile) = &self.review_profile {
+            let normalized = profile.trim().to_lowercase();
+            self.review_profile = if normalized.is_empty() {
+                None
+            } else if matches!(normalized.as_str(), "balanced" | "chill" | "assertive") {
+                Some(normalized)
+            } else {
+                None
+            };
+        }
+
+        if let Some(instructions) = &self.review_instructions {
+            if instructions.trim().is_empty() {
+                self.review_instructions = None;
+            }
         }
     }
 
@@ -217,12 +255,16 @@ mod tests {
         config.model = "   ".to_string();
         config.temperature = 5.0;
         config.max_tokens = 0;
+        config.min_confidence = 2.0;
+        config.review_profile = Some("ASSERTIVE".to_string());
 
         config.normalize();
 
         assert_eq!(config.model, default_model());
         assert_eq!(config.temperature, default_temperature());
         assert_eq!(config.max_tokens, default_max_tokens());
+        assert_eq!(config.min_confidence, 1.0);
+        assert_eq!(config.review_profile.as_deref(), Some("assertive"));
     }
 }
 
@@ -244,6 +286,10 @@ fn default_max_context_chars() -> usize {
 
 fn default_max_diff_chars() -> usize {
     40000
+}
+
+fn default_min_confidence() -> f32 {
+    0.0
 }
 
 fn default_true() -> bool {

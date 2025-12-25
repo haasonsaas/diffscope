@@ -9,8 +9,16 @@ impl SmartReviewPromptBuilder {
         context_chunks: &[LLMContextChunk],
         max_context_chars: usize,
         max_diff_chars: usize,
+        system_prompt_suffix: Option<&str>,
     ) -> Result<(String, String)> {
-        let system_prompt = Self::build_smart_review_system_prompt();
+        let mut system_prompt = Self::build_smart_review_system_prompt();
+        if let Some(suffix) = system_prompt_suffix {
+            let trimmed = suffix.trim();
+            if !trimmed.is_empty() {
+                system_prompt.push_str("\n\n");
+                system_prompt.push_str(trimmed);
+            }
+        }
         let user_prompt = Self::build_smart_review_user_prompt(
             diff,
             context_chunks,

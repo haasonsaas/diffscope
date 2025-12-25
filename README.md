@@ -190,10 +190,12 @@ Create a `.diffscope.yml` file in your repository:
 model: gpt-4o
 temperature: 0.2
 max_tokens: 4000
-max_context_chars: 20000
-max_diff_chars: 40000
 max_context_chars: 20000  # 0 disables context truncation
 max_diff_chars: 40000     # 0 disables diff truncation
+min_confidence: 0.0       # Drop comments below this confidence (0.0-1.0)
+review_profile: balanced  # balanced | chill | assertive
+review_instructions: |
+  Prioritize security and correctness issues. Avoid stylistic comments unless they impact maintainability.
 system_prompt: "Focus on security vulnerabilities, performance issues, and best practices"
 openai_use_responses: true  # Use OpenAI Responses API (recommended) instead of chat completions
 
@@ -403,6 +405,8 @@ For a large Python/FastAPI application at a company like Acme Inc:
 model: "claude-3-5-sonnet-20241022"
 temperature: 0.1  # Low for consistent reviews
 max_tokens: 4000
+min_confidence: 0.2
+review_profile: assertive
 
 system_prompt: |
   You are reviewing Python code for a production FastAPI application.
@@ -560,6 +564,8 @@ paths:
       - "**/*.generated.*"
     extra_context:
       - "src/auth/**"
+    review_instructions: |
+      Prioritize auth, validation, and sensitive data handling.
     system_prompt: |
       Focus on SQL injection, auth bypass, and input validation
     severity_overrides:

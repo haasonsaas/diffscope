@@ -346,6 +346,11 @@ async fn review_command(
             }
         }
 
+        if let Some(guidance) = build_review_guidance(&config, path_config) {
+            local_prompt_config.system_prompt.push_str("\n\n");
+            local_prompt_config.system_prompt.push_str(&guidance);
+        }
+
         let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
         let (system_prompt, user_prompt) =
             local_prompt_builder.build_prompt(&diff, &context_chunks)?;
@@ -389,6 +394,7 @@ async fn review_command(
     let processed_comments = plugin_manager
         .run_post_processors(all_comments, &repo_path_str)
         .await?;
+    let processed_comments = apply_confidence_threshold(processed_comments, config.min_confidence);
 
     let effective_format = if patch { OutputFormat::Patch } else { format };
     output_comments(&processed_comments, output_path, effective_format).await?;
@@ -866,6 +872,10 @@ async fn review_diff_content_raw(
                 local_prompt_config.system_prompt = prompt.clone();
             }
         }
+        if let Some(guidance) = build_review_guidance(&config, path_config) {
+            local_prompt_config.system_prompt.push_str("\n\n");
+            local_prompt_config.system_prompt.push_str(&guidance);
+        }
         let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
         let (system_prompt, user_prompt) =
             local_prompt_builder.build_prompt(&diff, &context_chunks)?;
@@ -910,6 +920,7 @@ async fn review_diff_content_raw(
     let processed_comments = plugin_manager
         .run_post_processors(all_comments, &repo_path_str)
         .await?;
+    let processed_comments = apply_confidence_threshold(processed_comments, config.min_confidence);
 
     Ok(processed_comments)
 }
@@ -1292,12 +1303,14 @@ async fn smart_review_command(
             context_chunks.extend(definition_chunks);
         }
 
+        let guidance = build_review_guidance(&config, path_config);
         let (system_prompt, user_prompt) =
             core::SmartReviewPromptBuilder::build_enhanced_review_prompt(
                 &diff,
                 &context_chunks,
                 config.max_context_chars,
                 config.max_diff_chars,
+                guidance.as_deref(),
             )?;
 
         let request = adapters::llm::LLMRequest {
@@ -1340,6 +1353,7 @@ async fn smart_review_command(
     let processed_comments = plugin_manager
         .run_post_processors(all_comments, &repo_path_str)
         .await?;
+    let processed_comments = apply_confidence_threshold(processed_comments, config.min_confidence);
 
     // Generate summary and output results
     let summary = core::CommentSynthesizer::generate_summary(&processed_comments);
@@ -1823,6 +1837,81 @@ fn filter_comments_for_diff(
     }
 
     filtered
+}
+
+fn build_review_guidance(
+    config: &config::Config,
+    path_config: Option<&config::PathConfig>,
+) -> Option<String> {
+    let mut sections = Vec::new();
+
+    if let Some(profile) = config.review_profile.as_deref() {
+        let guidance = match profile {
+            "chill" => Some(
+                "Be conservative and only surface high-confidence, high-impact issues. Avoid nitpicks and redundant comments.",
+            ),
+            "assertive" => Some(
+                "Be thorough and proactive. Surface edge cases, latent risks, and maintainability concerns even if they are subtle.",
+            ),
+            _ => None,
+        };
+        if let Some(text) = guidance {
+            sections.push(format!("Review profile ({}): {}", profile, text));
+        }
+    }
+
+    if let Some(instructions) = config.review_instructions.as_deref() {
+        let trimmed = instructions.trim();
+        if !trimmed.is_empty() {
+            sections.push(format!("Global review instructions:\n{}", trimmed));
+        }
+    }
+
+    if let Some(pc) = path_config {
+        if let Some(instructions) = pc.review_instructions.as_deref() {
+            let trimmed = instructions.trim();
+            if !trimmed.is_empty() {
+                sections.push(format!("Path-specific instructions:\n{}", trimmed));
+            }
+        }
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Additional review guidance:\n{}",
+            sections.join("\n\n")
+        ))
+    }
+}
+
+fn apply_confidence_threshold(
+    comments: Vec<core::Comment>,
+    min_confidence: f32,
+) -> Vec<core::Comment> {
+    if min_confidence <= 0.0 {
+        return comments;
+    }
+
+    let total = comments.len();
+    let mut kept = Vec::with_capacity(total);
+
+    for comment in comments {
+        if comment.confidence >= min_confidence {
+            kept.push(comment);
+        }
+    }
+
+    if kept.len() != total {
+        let dropped = total.saturating_sub(kept.len());
+        info!(
+            "Dropped {} comment(s) below confidence threshold {}",
+            dropped, min_confidence
+        );
+    }
+
+    kept
 }
 
 fn is_line_in_diff(diff: &core::UnifiedDiff, line_number: usize) -> bool {

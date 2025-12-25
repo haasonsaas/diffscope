@@ -7,6 +7,10 @@ temperature: 0.2
 max_tokens: 4000
 max_context_chars: 20000  # 0 disables context truncation
 max_diff_chars: 40000     # 0 disables diff truncation
+min_confidence: 0.0       # Drop comments below this confidence (0.0-1.0)
+review_profile: balanced  # balanced | chill | assertive
+review_instructions: |
+  Prioritize security and correctness issues. Avoid stylistic comments unless they impact maintainability.
 
 # API configuration (optional - can use environment variables)
 # api_key: your-api-key-here
@@ -30,6 +34,8 @@ paths:
       - security
       - validation
       - authentication
+    review_instructions: |
+      Treat auth and input validation as critical. Flag missing rate limits and unsafe defaults.
     severity_overrides:
       security: error  # Elevate all security issues to errors
     system_prompt: |
