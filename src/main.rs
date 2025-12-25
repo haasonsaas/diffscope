@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -230,6 +231,18 @@ async fn review_command(
 
     let diff_content = if let Some(path) = diff_path {
         tokio::fs::read_to_string(path).await?
+    } else if std::io::stdin().is_terminal() {
+        if let Ok(git) = core::GitIntegration::new(".") {
+            let diff = git.get_uncommitted_diff()?;
+            if diff.is_empty() {
+                println!("No changes found");
+                return Ok(());
+            }
+            diff
+        } else {
+            println!("No diff provided and not in a git repository.");
+            return Ok(());
+        }
     } else {
         use std::io::Read;
         let mut buffer = String::new();
@@ -1163,6 +1176,18 @@ async fn smart_review_command(
 
     let diff_content = if let Some(path) = diff_path {
         tokio::fs::read_to_string(path).await?
+    } else if std::io::stdin().is_terminal() {
+        if let Ok(git) = core::GitIntegration::new(".") {
+            let diff = git.get_uncommitted_diff()?;
+            if diff.is_empty() {
+                println!("No changes found");
+                return Ok(());
+            }
+            diff
+        } else {
+            println!("No diff provided and not in a git repository.");
+            return Ok(());
+        }
     } else {
         use std::io::Read;
         let mut buffer = String::new();

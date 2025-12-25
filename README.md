@@ -74,6 +74,9 @@ git diff | diffscope review
 # Review a specific file diff
 diffscope review --diff patch.diff
 
+# Run without stdin to review uncommitted changes
+diffscope review
+
 # Get enhanced analysis with smart review
 git diff | diffscope smart-review
 ```
@@ -88,6 +91,9 @@ diffscope git uncommitted
 
 # Compare your branch to main
 diffscope git branch main
+
+# Compare your branch to the repo default
+diffscope git branch
 
 # Get AI-powered commit message suggestions
 diffscope git suggest
