@@ -1,5 +1,8 @@
 use anyhow::Result;
+use glob::glob;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,9 +36,9 @@ impl ContextFetcher {
         let full_path = self.repo_path.join(file_path);
         if full_path.exists() {
             let content = tokio::fs::read_to_string(&full_path).await?;
+            let file_lines: Vec<&str> = content.lines().collect();
             
             for (start, end) in lines {
-                let file_lines: Vec<&str> = content.lines().collect();
                 let start_idx = start.saturating_sub(1);
                 let end_idx = (*end).min(file_lines.len());
                 
@@ -51,6 +54,53 @@ impl ContextFetcher {
             }
         }
         
+        Ok(chunks)
+    }
+
+    pub async fn fetch_additional_context(&self, patterns: &[String]) -> Result<Vec<LLMContextChunk>> {
+        let mut chunks = Vec::new();
+        if patterns.is_empty() {
+            return Ok(chunks);
+        }
+
+        let mut matched_paths = HashSet::new();
+        for pattern in patterns {
+            let pattern_path = if Path::new(pattern).is_absolute() {
+                pattern.clone()
+            } else {
+                self.repo_path.join(pattern).to_string_lossy().to_string()
+            };
+
+            if let Ok(entries) = glob(&pattern_path) {
+                for entry in entries {
+                    if let Ok(path) = entry {
+                        if path.is_file() {
+                            matched_paths.insert(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        let max_files = 10usize;
+        let max_lines = 200usize;
+
+        for path in matched_paths.into_iter().take(max_files) {
+            let relative_path = path.strip_prefix(&self.repo_path).unwrap_or(&path);
+            let content = tokio::fs::read_to_string(&path).await?;
+            let snippet = content.lines().take(max_lines).collect::<Vec<_>>().join("\n");
+            if snippet.trim().is_empty() {
+                continue;
+            }
+
+            chunks.push(LLMContextChunk {
+                file_path: relative_path.to_path_buf(),
+                content: snippet,
+                context_type: ContextType::Reference,
+                line_range: None,
+            });
+        }
+
         Ok(chunks)
     }
 

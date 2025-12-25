@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use git2::{Repository, DiffOptions, DiffFormat};
-use std::path::Path;
+use git2::{BranchType, DiffFormat, DiffOptions, Repository};
+use std::path::{Path, PathBuf};
 
 pub struct GitIntegration {
     repo: Repository,
@@ -107,5 +107,28 @@ impl GitIntegration {
         }
         
         Ok(commits)
+    }
+
+    pub fn workdir(&self) -> Option<PathBuf> {
+        self.repo.workdir().map(|path| path.to_path_buf())
+    }
+
+    pub fn get_default_branch(&self) -> Result<String> {
+        if let Ok(reference) = self.repo.find_reference("refs/remotes/origin/HEAD") {
+            if let Some(target) = reference.symbolic_target() {
+                if let Some(branch) = target.rsplit('/').next() {
+                    return Ok(branch.to_string());
+                }
+            }
+        }
+
+        if self.repo.find_branch("main", BranchType::Local).is_ok() {
+            return Ok("main".to_string());
+        }
+        if self.repo.find_branch("master", BranchType::Local).is_ok() {
+            return Ok("master".to_string());
+        }
+
+        Ok("main".to_string())
     }
 }

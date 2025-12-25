@@ -36,7 +36,7 @@ pub struct ReviewSummary {
     pub recommendations: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Severity {
     Error,
     Warning,
@@ -44,7 +44,7 @@ pub enum Severity {
     Suggestion,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Category {
     Bug,
     Security,
@@ -57,7 +57,7 @@ pub enum Category {
     Architecture,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FixEffort {
     Low,    // < 5 minutes
     Medium, // 5-30 minutes
@@ -117,11 +117,27 @@ impl CommentSynthesizer {
     }
 
     fn process_raw_comment(raw: RawComment) -> Result<Option<Comment>> {
-        let severity = Self::determine_severity(&raw.content);
-        let category = Self::determine_category(&raw.content);
-        let confidence = Self::calculate_confidence(&raw.content, &severity, &category);
-        let tags = Self::extract_tags(&raw.content, &category);
-        let fix_effort = Self::determine_fix_effort(&raw.content, &category);
+        let severity = raw
+            .severity
+            .clone()
+            .unwrap_or_else(|| Self::determine_severity(&raw.content));
+        let category = raw
+            .category
+            .clone()
+            .unwrap_or_else(|| Self::determine_category(&raw.content));
+        let confidence = raw.confidence.unwrap_or_else(|| {
+            Self::calculate_confidence(&raw.content, &severity, &category)
+        });
+        let confidence = confidence.max(0.0).min(1.0);
+        let tags = if raw.tags.is_empty() {
+            Self::extract_tags(&raw.content, &category)
+        } else {
+            raw.tags.clone()
+        };
+        let fix_effort = raw
+            .fix_effort
+            .clone()
+            .unwrap_or_else(|| Self::determine_fix_effort(&raw.content, &category));
         let code_suggestion = Self::generate_code_suggestion(&raw);
         
         Ok(Some(Comment {
@@ -357,4 +373,9 @@ pub struct RawComment {
     pub line_number: usize,
     pub content: String,
     pub suggestion: Option<String>,
+    pub severity: Option<Severity>,
+    pub category: Option<Category>,
+    pub confidence: Option<f32>,
+    pub fix_effort: Option<FixEffort>,
+    pub tags: Vec<String>,
 }

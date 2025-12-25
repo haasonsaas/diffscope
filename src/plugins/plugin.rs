@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::core::{UnifiedDiff, LLMContextChunk, Comment};
+use crate::config::PluginConfig;
 use crate::plugins::{PreAnalyzer, PostProcessor};
 
 #[async_trait]
@@ -31,10 +32,16 @@ impl PluginManager {
         }
     }
     
-    pub async fn load_builtin_plugins(&mut self) -> Result<()> {
-        self.register_pre_analyzer(Arc::new(crate::plugins::builtin::EslintAnalyzer::new()));
-        self.register_pre_analyzer(Arc::new(crate::plugins::builtin::SemgrepAnalyzer::new()));
-        self.register_post_processor(Arc::new(crate::plugins::builtin::DuplicateFilter::new()));
+    pub async fn load_builtin_plugins(&mut self, config: &PluginConfig) -> Result<()> {
+        if config.eslint {
+            self.register_pre_analyzer(Arc::new(crate::plugins::builtin::EslintAnalyzer::new()));
+        }
+        if config.semgrep {
+            self.register_pre_analyzer(Arc::new(crate::plugins::builtin::SemgrepAnalyzer::new()));
+        }
+        if config.duplicate_filter {
+            self.register_post_processor(Arc::new(crate::plugins::builtin::DuplicateFilter::new()));
+        }
         
         Ok(())
     }
@@ -83,5 +90,25 @@ impl PluginManager {
         }
         
         Ok(processed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn load_builtin_plugins_respects_config() {
+        let mut manager = PluginManager::new();
+        let config = PluginConfig {
+            eslint: false,
+            semgrep: true,
+            duplicate_filter: false,
+        };
+
+        manager.load_builtin_plugins(&config).await.unwrap();
+
+        assert_eq!(manager.pre_analyzers.len(), 1);
+        assert_eq!(manager.post_processors.len(), 0);
     }
 }

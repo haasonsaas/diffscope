@@ -5,7 +5,9 @@ mod config;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::path::{Path, PathBuf};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -150,7 +152,7 @@ async fn main() -> Result<()> {
             review_command(config, diff, patch, output, cli.output_format).await?;
         }
         Commands::Check { path } => {
-            check_command(path, config).await?;
+            check_command(path, config, cli.output_format).await?;
         }
         Commands::Git { command } => {
             git_command(command, config, cli.output_format).await?;
@@ -175,7 +177,7 @@ async fn main() -> Result<()> {
 async fn review_command(
     config: config::Config,
     diff_path: Option<PathBuf>,
-    _patch: bool,
+    patch: bool,
     output_path: Option<PathBuf>,
     format: OutputFormat,
 ) -> Result<()> {
@@ -243,6 +245,11 @@ async fn review_command(
                 };
                 context_chunks.push(focus_chunk);
             }
+
+            if !pc.extra_context.is_empty() {
+                let extra_chunks = context_fetcher.fetch_additional_context(&pc.extra_context).await?;
+                context_chunks.extend(extra_chunks);
+            }
         }
         
         let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
@@ -281,18 +288,25 @@ async fn review_command(
         }
     }
     
-    output_comments(&all_comments, output_path, format).await?;
+    let effective_format = if patch { OutputFormat::Patch } else { format };
+    output_comments(&all_comments, output_path, effective_format).await?;
     
     Ok(())
 }
 
-async fn check_command(path: PathBuf, config: config::Config) -> Result<()> {
+async fn check_command(path: PathBuf, config: config::Config, format: OutputFormat) -> Result<()> {
     info!("Checking repository at: {}", path.display());
     info!("Using model: {}", config.model);
-    
-    println!("Repository check not yet implemented");
-    
-    Ok(())
+
+    let git = core::GitIntegration::new(&path)?;
+    let diff_content = git.get_uncommitted_diff()?;
+    if diff_content.is_empty() {
+        println!("No changes found in {}", path.display());
+        return Ok(());
+    }
+
+    let repo_root = git.workdir().unwrap_or(path);
+    review_diff_content_with_repo(&diff_content, config, format, &repo_root).await
 }
 
 async fn git_command(command: GitCommands, config: config::Config, format: OutputFormat) -> Result<()> {
@@ -324,12 +338,13 @@ async fn git_command(command: GitCommands, config: config::Config, format: Outpu
         return Ok(());
     }
     
-    review_diff_content(&diff_content, config, format).await
+    let repo_root = git.workdir().unwrap_or_else(|| PathBuf::from("."));
+    review_diff_content_with_repo(&diff_content, config, format, &repo_root).await
 }
 
 async fn pr_command(
     number: Option<u32>,
-    _repo: Option<String>,
+    repo: Option<String>,
     post_comments: bool,
     summary: bool,
     config: config::Config,
@@ -341,16 +356,37 @@ async fn pr_command(
         num.to_string()
     } else {
         // Get current PR number
-        let output = Command::new("gh")
-            .args(&["pr", "view", "--json", "number", "-q", ".number"])
-            .output()?;
-        String::from_utf8(output.stdout)?.trim().to_string()
+        let mut args = vec![
+            "pr".to_string(),
+            "view".to_string(),
+            "--json".to_string(),
+            "number".to_string(),
+            "-q".to_string(),
+            ".number".to_string(),
+        ];
+        if let Some(repo) = repo.as_ref() {
+            args.push("--repo".to_string());
+            args.push(repo.clone());
+        }
+
+        let output = Command::new("gh").args(&args).output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("gh pr view failed: {}", stderr.trim());
+        }
+
+        let pr_number = String::from_utf8(output.stdout)?.trim().to_string();
+        if pr_number.is_empty() {
+            anyhow::bail!("Unable to determine PR number from gh output");
+        }
+        pr_number
     };
     
     info!("Reviewing PR #{}", pr_number);
     
     // Get additional git context
     let git = core::GitIntegration::new(".")?;
+    let repo_root = git.workdir().unwrap_or_else(|| PathBuf::from("."));
     if let Ok(branch) = git.get_current_branch() {
         info!("Current branch: {}", branch);
     }
@@ -359,9 +395,16 @@ async fn pr_command(
     }
     
     // Get PR diff
-    let diff_output = Command::new("gh")
-        .args(&["pr", "diff", &pr_number])
-        .output()?;
+    let mut diff_args = vec!["pr".to_string(), "diff".to_string(), pr_number.clone()];
+    if let Some(repo) = repo.as_ref() {
+        diff_args.push("--repo".to_string());
+        diff_args.push(repo.clone());
+    }
+    let diff_output = Command::new("gh").args(&diff_args).output()?;
+    if !diff_output.status.success() {
+        let stderr = String::from_utf8_lossy(&diff_output.stderr);
+        anyhow::bail!("gh pr diff failed: {}", stderr.trim());
+    }
     
     let diff_content = String::from_utf8(diff_output.stdout)?;
     
@@ -390,7 +433,7 @@ async fn pr_command(
         return Ok(());
     }
     
-    let comments = review_diff_content_raw(&diff_content, config.clone()).await?;
+    let comments = review_diff_content_raw(&diff_content, config.clone(), &repo_root).await?;
     
     if post_comments && !comments.is_empty() {
         info!("Posting {} comments to PR", comments.len());
@@ -401,12 +444,22 @@ async fn pr_command(
                 comment.content
             );
             
-            Command::new("gh")
-                .args(&[
-                    "pr", "comment", &pr_number,
-                    "--body", &body
-                ])
-                .output()?;
+            let mut comment_args = vec![
+                "pr".to_string(),
+                "comment".to_string(),
+                pr_number.clone(),
+                "--body".to_string(),
+                body,
+            ];
+            if let Some(repo) = repo.as_ref() {
+                comment_args.push("--repo".to_string());
+                comment_args.push(repo.clone());
+            }
+            let comment_output = Command::new("gh").args(&comment_args).output()?;
+            if !comment_output.status.success() {
+                let stderr = String::from_utf8_lossy(&comment_output.stderr);
+                anyhow::bail!("gh pr comment failed: {}", stderr.trim());
+            }
         }
         
         println!("Posted {} comments to PR #{}", comments.len(), pr_number);
@@ -460,10 +513,11 @@ async fn suggest_commit_message(config: config::Config) -> Result<()> {
 
 async fn suggest_pr_title(config: config::Config) -> Result<()> {
     let git = core::GitIntegration::new(".")?;
-    let diff_content = git.get_branch_diff("main")?;
+    let base_branch = git.get_default_branch().unwrap_or_else(|_| "main".to_string());
+    let diff_content = git.get_branch_diff(&base_branch)?;
     
     if diff_content.is_empty() {
-        println!("No changes found compared to main branch.");
+        println!("No changes found compared to {} branch.", base_branch);
         return Ok(());
     }
     
@@ -568,20 +622,30 @@ async fn review_diff_content(
     config: config::Config,
     format: OutputFormat,
 ) -> Result<()> {
-    let comments = review_diff_content_raw(diff_content, config).await?;
+    review_diff_content_with_repo(diff_content, config, format, Path::new(".")).await
+}
+
+async fn review_diff_content_with_repo(
+    diff_content: &str,
+    config: config::Config,
+    format: OutputFormat,
+    repo_path: &Path,
+) -> Result<()> {
+    let comments = review_diff_content_raw(diff_content, config, repo_path).await?;
     output_comments(&comments, None, format).await
 }
 
 async fn review_diff_content_raw(
     diff_content: &str,
     config: config::Config,
+    repo_path: &Path,
 ) -> Result<Vec<core::Comment>> {
     let diffs = core::DiffParser::parse_unified_diff(diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
     
     // Initialize plugin manager and load builtin plugins
     let mut plugin_manager = plugins::plugin::PluginManager::new();
-    plugin_manager.load_builtin_plugins().await?;
+    plugin_manager.load_builtin_plugins(&config.plugins).await?;
     
     let model_config = adapters::llm::ModelConfig {
         model_name: config.model.clone(),
@@ -595,8 +659,16 @@ async fn review_diff_content_raw(
     let base_prompt_config = core::prompt::PromptConfig::default();
     let mut all_comments = Vec::new();
     
+    let repo_path_str = repo_path.to_string_lossy().to_string();
+    let context_fetcher = core::ContextFetcher::new(repo_path.to_path_buf());
+
     for diff in diffs {
-        let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
+        // Check if file should be excluded
+        if config.should_exclude(&diff.file_path) {
+            info!("Skipping excluded file: {}", diff.file_path.display());
+            continue;
+        }
+
         let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
             &diff.hunks.iter()
@@ -605,7 +677,7 @@ async fn review_diff_content_raw(
         ).await?;
         
         // Run pre-analyzers to get additional context
-        let analyzer_chunks = plugin_manager.run_pre_analyzers(&diff, ".").await?;
+        let analyzer_chunks = plugin_manager.run_pre_analyzers(&diff, &repo_path_str).await?;
         context_chunks.extend(analyzer_chunks);
         
         // Extract symbols from diff and fetch their definitions
@@ -615,10 +687,35 @@ async fn review_diff_content_raw(
             context_chunks.extend(definition_chunks);
         }
         
+        // Get path-specific configuration
+        let path_config = config.get_path_config(&diff.file_path);
+
+        // Add focus areas and extra context if configured
+        if let Some(pc) = path_config {
+            if !pc.focus.is_empty() {
+                let focus_chunk = core::LLMContextChunk {
+                    content: format!("Focus areas for this file: {}", pc.focus.join(", ")),
+                    context_type: core::ContextType::Documentation,
+                    file_path: diff.file_path.clone(),
+                    line_range: None,
+                };
+                context_chunks.push(focus_chunk);
+            }
+            if !pc.extra_context.is_empty() {
+                let extra_chunks = context_fetcher.fetch_additional_context(&pc.extra_context).await?;
+                context_chunks.extend(extra_chunks);
+            }
+        }
+
         // Create prompt builder with config
         let mut local_prompt_config = base_prompt_config.clone();
         if let Some(custom_prompt) = &config.system_prompt {
             local_prompt_config.system_prompt = custom_prompt.clone();
+        }
+        if let Some(pc) = path_config {
+            if let Some(ref prompt) = pc.system_prompt {
+                local_prompt_config.system_prompt = prompt.clone();
+            }
         }
         let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
         let (system_prompt, user_prompt) = local_prompt_builder.build_prompt(&diff, &context_chunks)?;
@@ -633,13 +730,31 @@ async fn review_diff_content_raw(
         let response = adapter.complete(request).await?;
         
         if let Ok(raw_comments) = parse_llm_response(&response.content, &diff.file_path) {
-            let comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+            let mut comments = core::CommentSynthesizer::synthesize(raw_comments)?;
+
+            // Apply severity overrides if configured
+            if let Some(pc) = path_config {
+                for comment in &mut comments {
+                    for (category, severity) in &pc.severity_overrides {
+                        if format!("{:?}", comment.category).to_lowercase() == category.to_lowercase() {
+                            comment.severity = match severity.to_lowercase().as_str() {
+                                "error" => core::comment::Severity::Error,
+                                "warning" => core::comment::Severity::Warning,
+                                "info" => core::comment::Severity::Info,
+                                "suggestion" => core::comment::Severity::Suggestion,
+                                _ => comment.severity.clone(),
+                            };
+                        }
+                    }
+                }
+            }
+
             all_comments.extend(comments);
         }
     }
     
     // Run post-processors to filter and refine comments
-    let processed_comments = plugin_manager.run_post_processors(all_comments, ".").await?;
+    let processed_comments = plugin_manager.run_post_processors(all_comments, &repo_path_str).await?;
     
     Ok(processed_comments)
 }
@@ -686,6 +801,11 @@ fn parse_llm_response(content: &str, file_path: &PathBuf) -> Result<Vec<core::co
                 line_number,
                 content,
                 suggestion,
+                severity: None,
+                category: None,
+                confidence: None,
+                fix_effort: None,
+                tags: Vec::new(),
             });
         }
     }
@@ -905,6 +1025,10 @@ async fn smart_review_command(
                 };
                 context_chunks.push(focus_chunk);
             }
+            if !pc.extra_context.is_empty() {
+                let extra_chunks = context_fetcher.fetch_additional_context(&pc.extra_context).await?;
+                context_chunks.extend(extra_chunks);
+            }
         }
         
         // Extract symbols and get definitions
@@ -965,49 +1089,89 @@ async fn smart_review_command(
 fn parse_smart_review_response(content: &str, file_path: &PathBuf) -> Result<Vec<core::comment::RawComment>> {
     let mut comments = Vec::new();
     let mut current_comment: Option<core::comment::RawComment> = None;
+    let mut section: Option<SmartSection> = None;
     
     for line in content.lines() {
         let trimmed = line.trim();
-        
-        if trimmed.starts_with("ISSUE:") {
+
+        if let Some(title) = trimmed.strip_prefix("ISSUE:") {
             // Save previous comment if exists
             if let Some(comment) = current_comment.take() {
                 comments.push(comment);
             }
-            
+
             // Start new comment
-            let title = trimmed.strip_prefix("ISSUE:").unwrap_or("").trim();
+            let title = title.trim();
             current_comment = Some(core::comment::RawComment {
                 file_path: file_path.clone(),
                 line_number: 1,
                 content: title.to_string(),
                 suggestion: None,
+                severity: None,
+                category: None,
+                confidence: None,
+                fix_effort: None,
+                tags: Vec::new(),
             });
-        } else if trimmed.starts_with("LINE:") {
-            if let Some(ref mut comment) = current_comment {
-                if let Ok(line_num) = trimmed.strip_prefix("LINE:").unwrap_or("").trim().parse::<usize>() {
-                    comment.line_number = line_num;
-                }
-            }
-        } else if trimmed.starts_with("DESCRIPTION:") {
-            // Start collecting description on next line
+            section = None;
             continue;
-        } else if trimmed.starts_with("SUGGESTION:") {
-            // Start collecting suggestion on next line  
-            continue;
-        } else if !trimmed.is_empty() && 
-                  !trimmed.starts_with("SEVERITY:") && 
-                  !trimmed.starts_with("CATEGORY:") &&
-                  !trimmed.starts_with("CONFIDENCE:") &&
-                  !trimmed.starts_with("EFFORT:") &&
-                  !trimmed.starts_with("TAGS:") {
-            // This is content - add to current comment
-            if let Some(ref mut comment) = current_comment {
-                if !comment.content.is_empty() {
-                    comment.content.push(' ');
-                }
-                comment.content.push_str(trimmed);
+        }
+
+        let comment = match current_comment.as_mut() {
+            Some(comment) => comment,
+            None => continue,
+        };
+
+        if let Some(value) = trimmed.strip_prefix("LINE:") {
+            if let Ok(line_num) = value.trim().parse::<usize>() {
+                comment.line_number = line_num;
             }
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("SEVERITY:") {
+            comment.severity = parse_smart_severity(value.trim());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("CATEGORY:") {
+            comment.category = parse_smart_category(value.trim());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("CONFIDENCE:") {
+            comment.confidence = parse_smart_confidence(value.trim());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("EFFORT:") {
+            comment.fix_effort = parse_smart_effort(value.trim());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("TAGS:") {
+            comment.tags = parse_smart_tags(value.trim());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("DESCRIPTION:") {
+            section = Some(SmartSection::Description);
+            let value = value.trim();
+            if !value.is_empty() {
+                append_content(&mut comment.content, value);
+            }
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("SUGGESTION:") {
+            section = Some(SmartSection::Suggestion);
+            let value = value.trim();
+            if !value.is_empty() {
+                append_suggestion(&mut comment.suggestion, value);
+            }
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        match section {
+            Some(SmartSection::Suggestion) => append_suggestion(&mut comment.suggestion, trimmed),
+            _ => append_content(&mut comment.content, trimmed),
         }
     }
     
@@ -1017,6 +1181,85 @@ fn parse_smart_review_response(content: &str, file_path: &PathBuf) -> Result<Vec
     }
     
     Ok(comments)
+}
+
+#[derive(Clone, Copy)]
+enum SmartSection {
+    Description,
+    Suggestion,
+}
+
+fn append_content(content: &mut String, value: &str) {
+    if !content.is_empty() {
+        content.push(' ');
+    }
+    content.push_str(value);
+}
+
+fn append_suggestion(suggestion: &mut Option<String>, value: &str) {
+    match suggestion {
+        Some(existing) => {
+            if !existing.is_empty() {
+                existing.push(' ');
+            }
+            existing.push_str(value);
+        }
+        None => {
+            *suggestion = Some(value.to_string());
+        }
+    }
+}
+
+fn parse_smart_severity(value: &str) -> Option<core::comment::Severity> {
+    match value.to_lowercase().as_str() {
+        "critical" => Some(core::comment::Severity::Error),
+        "high" => Some(core::comment::Severity::Warning),
+        "medium" => Some(core::comment::Severity::Info),
+        "low" => Some(core::comment::Severity::Suggestion),
+        _ => None,
+    }
+}
+
+fn parse_smart_category(value: &str) -> Option<core::comment::Category> {
+    match value.to_lowercase().as_str() {
+        "security" => Some(core::comment::Category::Security),
+        "performance" => Some(core::comment::Category::Performance),
+        "bug" => Some(core::comment::Category::Bug),
+        "maintainability" => Some(core::comment::Category::Maintainability),
+        "testing" => Some(core::comment::Category::Testing),
+        "style" => Some(core::comment::Category::Style),
+        "documentation" => Some(core::comment::Category::Documentation),
+        "architecture" => Some(core::comment::Category::Architecture),
+        "bestpractice" | "best_practice" | "best practice" => Some(core::comment::Category::BestPractice),
+        _ => None,
+    }
+}
+
+fn parse_smart_confidence(value: &str) -> Option<f32> {
+    let trimmed = value.trim().trim_end_matches('%');
+    if let Ok(percent) = trimmed.parse::<f32>() {
+        Some((percent / 100.0).max(0.0).min(1.0))
+    } else {
+        None
+    }
+}
+
+fn parse_smart_effort(value: &str) -> Option<core::comment::FixEffort> {
+    match value.to_lowercase().as_str() {
+        "low" => Some(core::comment::FixEffort::Low),
+        "medium" => Some(core::comment::FixEffort::Medium),
+        "high" => Some(core::comment::FixEffort::High),
+        _ => None,
+    }
+}
+
+fn parse_smart_tags(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .map(|tag| tag.to_string())
+        .collect()
 }
 
 fn format_smart_review_output(comments: &[core::Comment], summary: &core::comment::ReviewSummary) -> String {
@@ -1034,18 +1277,34 @@ fn format_smart_review_output(comments: &[core::Comment], summary: &core::commen
     
     // Quick Stats
     output.push_str("### 📈 Issue Breakdown\n\n");
-    output.push_str("| Severity | Count | Category | Count |\n");
-    output.push_str("|----------|-------|----------|-------|\n");
-    
+
+    output.push_str("#### By Severity\n\n");
+    output.push_str("| Severity | Count |\n");
+    output.push_str("|----------|-------|\n");
     let severities = ["Error", "Warning", "Info", "Suggestion"];
-    let categories = ["Security", "Performance", "Bug", "Maintainability"];
-    
-    for (i, severity) in severities.iter().enumerate() {
-        let sev_count = summary.by_severity.get(*severity).unwrap_or(&0);
-        let cat = categories.get(i).unwrap_or(&"");
-        let cat_count = summary.by_category.get(*cat).unwrap_or(&0);
-        
-        output.push_str(&format!("| {} | {} | {} | {} |\n", severity, sev_count, cat, cat_count));
+    for severity in severities {
+        let sev_count = summary.by_severity.get(severity).unwrap_or(&0);
+        output.push_str(&format!("| {} | {} |\n", severity, sev_count));
+    }
+    output.push_str("\n");
+
+    output.push_str("#### By Category\n\n");
+    output.push_str("| Category | Count |\n");
+    output.push_str("|----------|-------|\n");
+    let categories = [
+        "Security",
+        "Performance",
+        "Bug",
+        "Maintainability",
+        "Testing",
+        "Style",
+        "Documentation",
+        "Architecture",
+        "BestPractice",
+    ];
+    for category in categories {
+        let cat_count = summary.by_category.get(category).unwrap_or(&0);
+        output.push_str(&format!("| {} | {} |\n", category, cat_count));
     }
     output.push_str("\n");
     
@@ -1201,13 +1460,18 @@ async fn changelog_command(
 
 fn extract_symbols_from_diff(diff: &core::UnifiedDiff) -> Vec<String> {
     let mut symbols = Vec::new();
-    let symbol_regex = regex::Regex::new(r"\b([A-Z][a-zA-Z0-9_]*|[a-z][a-zA-Z0-9_]*)\s*\(").unwrap();
+    static SYMBOL_REGEX: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"\b([A-Z][a-zA-Z0-9_]*|[a-z][a-zA-Z0-9_]*)\s*\(").unwrap()
+    });
+    static CLASS_REGEX: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"\b(class|struct|interface|enum)\s+([A-Z][a-zA-Z0-9_]*)").unwrap()
+    });
     
     for hunk in &diff.hunks {
         for line in &hunk.changes {
             if matches!(line.change_type, core::diff_parser::ChangeType::Added | core::diff_parser::ChangeType::Removed) {
                 // Extract function calls and references
-                for capture in symbol_regex.captures_iter(&line.content) {
+                for capture in SYMBOL_REGEX.captures_iter(&line.content) {
                     if let Some(symbol) = capture.get(1) {
                         let symbol_str = symbol.as_str().to_string();
                         if symbol_str.len() > 2 && !symbols.contains(&symbol_str) {
@@ -1217,8 +1481,7 @@ fn extract_symbols_from_diff(diff: &core::UnifiedDiff) -> Vec<String> {
                 }
                 
                 // Also look for class/struct references
-                let class_regex = regex::Regex::new(r"\b(class|struct|interface|enum)\s+([A-Z][a-zA-Z0-9_]*)").unwrap();
-                for capture in class_regex.captures_iter(&line.content) {
+                for capture in CLASS_REGEX.captures_iter(&line.content) {
                     if let Some(class_name) = capture.get(2) {
                         let class_str = class_name.as_str().to_string();
                         if !symbols.contains(&class_str) {
@@ -1231,4 +1494,45 @@ fn extract_symbols_from_diff(diff: &core::UnifiedDiff) -> Vec<String> {
     }
     
     symbols
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_smart_review_response_parses_fields() {
+        let input = r#"
+ISSUE: Missing auth check
+LINE: 42
+SEVERITY: CRITICAL
+CATEGORY: Security
+CONFIDENCE: 85%
+EFFORT: High
+
+DESCRIPTION:
+Authentication is missing.
+
+SUGGESTION:
+Add a guard.
+
+TAGS: auth, security
+"#;
+        let file_path = PathBuf::from("src/lib.rs");
+        let comments = parse_smart_review_response(input, &file_path).unwrap();
+        assert_eq!(comments.len(), 1);
+
+        let comment = &comments[0];
+        assert_eq!(comment.line_number, 42);
+        assert_eq!(comment.severity, Some(core::comment::Severity::Error));
+        assert_eq!(comment.category, Some(core::comment::Category::Security));
+        assert!(comment.content.contains("Missing auth check"));
+        assert!(comment.content.contains("Authentication is missing."));
+        assert_eq!(comment.suggestion.as_deref(), Some("Add a guard."));
+        assert_eq!(comment.tags, vec!["auth".to_string(), "security".to_string()]);
+
+        let confidence = comment.confidence.unwrap_or(0.0);
+        assert!((confidence - 0.85).abs() < 0.0001);
+        assert_eq!(comment.fix_effort, Some(core::comment::FixEffort::High));
+    }
 }
