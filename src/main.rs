@@ -268,13 +268,19 @@ async fn review_command(
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let base_prompt_config = core::prompt::PromptConfig::default();
+    let mut base_prompt_config = core::prompt::PromptConfig::default();
+    base_prompt_config.max_context_chars = config.max_context_chars;
+    base_prompt_config.max_diff_chars = config.max_diff_chars;
     let mut all_comments = Vec::new();
 
     for diff in diffs {
         // Check if file should be excluded
         if config.should_exclude(&diff.file_path) {
             info!("Skipping excluded file: {}", diff.file_path.display());
+            continue;
+        }
+        if diff.is_deleted {
+            info!("Skipping deleted file: {}", diff.file_path.display());
             continue;
         }
         if diff.is_binary || diff.hunks.is_empty() {
@@ -779,7 +785,9 @@ async fn review_diff_content_raw(
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let base_prompt_config = core::prompt::PromptConfig::default();
+    let mut base_prompt_config = core::prompt::PromptConfig::default();
+    base_prompt_config.max_context_chars = config.max_context_chars;
+    base_prompt_config.max_diff_chars = config.max_diff_chars;
     let mut all_comments = Vec::new();
 
     let repo_path_str = repo_path.to_string_lossy().to_string();
@@ -789,6 +797,10 @@ async fn review_diff_content_raw(
         // Check if file should be excluded
         if config.should_exclude(&diff.file_path) {
             info!("Skipping excluded file: {}", diff.file_path.display());
+            continue;
+        }
+        if diff.is_deleted {
+            info!("Skipping deleted file: {}", diff.file_path.display());
             continue;
         }
         if diff.is_binary || diff.hunks.is_empty() {
@@ -1223,6 +1235,10 @@ async fn smart_review_command(
             info!("Skipping excluded file: {}", diff.file_path.display());
             continue;
         }
+        if diff.is_deleted {
+            info!("Skipping deleted file: {}", diff.file_path.display());
+            continue;
+        }
         if diff.is_binary || diff.hunks.is_empty() {
             info!("Skipping non-text diff: {}", diff.file_path.display());
             continue;
@@ -1277,7 +1293,12 @@ async fn smart_review_command(
         }
 
         let (system_prompt, user_prompt) =
-            core::SmartReviewPromptBuilder::build_enhanced_review_prompt(&diff, &context_chunks)?;
+            core::SmartReviewPromptBuilder::build_enhanced_review_prompt(
+                &diff,
+                &context_chunks,
+                config.max_context_chars,
+                config.max_diff_chars,
+            )?;
 
         let request = adapters::llm::LLMRequest {
             system_prompt,

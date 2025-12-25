@@ -7,9 +7,16 @@ impl SmartReviewPromptBuilder {
     pub fn build_enhanced_review_prompt(
         diff: &UnifiedDiff,
         context_chunks: &[LLMContextChunk],
+        max_context_chars: usize,
+        max_diff_chars: usize,
     ) -> Result<(String, String)> {
         let system_prompt = Self::build_smart_review_system_prompt();
-        let user_prompt = Self::build_smart_review_user_prompt(diff, context_chunks)?;
+        let user_prompt = Self::build_smart_review_user_prompt(
+            diff,
+            context_chunks,
+            max_context_chars,
+            max_diff_chars,
+        )?;
 
         Ok((system_prompt, user_prompt))
     }
@@ -72,10 +79,13 @@ TAGS: [comma-separated relevant tags]
     fn build_smart_review_user_prompt(
         diff: &UnifiedDiff,
         context_chunks: &[LLMContextChunk],
+        max_context_chars: usize,
+        max_diff_chars: usize,
     ) -> Result<String> {
         let mut prompt = String::new();
         let mut context_chars = 0usize;
-        const MAX_CONTEXT_CHARS: usize = 20000;
+        let mut diff_chars = 0usize;
+        let mut diff_truncated = false;
 
         prompt.push_str(&format!(
             "Please review the following code changes in file: {}\n\n",
@@ -104,7 +114,9 @@ TAGS: [comma-separated relevant tags]
                         .collect::<Vec<_>>()
                         .join("\n")
                 );
-                if context_chars.saturating_add(block.len()) > MAX_CONTEXT_CHARS {
+                if max_context_chars > 0
+                    && context_chars.saturating_add(block.len()) > max_context_chars
+                {
                     prompt.push_str("[Context truncated]\n\n");
                     break;
                 }
@@ -117,15 +129,26 @@ TAGS: [comma-separated relevant tags]
 
         // Format the diff with line numbers and change indicators
         for hunk in &diff.hunks {
-            prompt.push_str(&format!(
+            let hunk_header = format!(
                 "### Hunk: Lines {}-{} (was {}-{})\n\n",
                 hunk.new_start,
                 hunk.new_start + hunk.new_lines,
                 hunk.old_start,
                 hunk.old_start + hunk.old_lines
-            ));
+            );
+            if max_diff_chars > 0 && diff_chars.saturating_add(hunk_header.len()) > max_diff_chars {
+                diff_truncated = true;
+                break;
+            }
+            prompt.push_str(&hunk_header);
+            diff_chars = diff_chars.saturating_add(hunk_header.len());
 
+            if max_diff_chars > 0 && diff_chars.saturating_add("```diff\n".len()) > max_diff_chars {
+                diff_truncated = true;
+                break;
+            }
             prompt.push_str("```diff\n");
+            diff_chars = diff_chars.saturating_add("```diff\n".len());
             let mut line_num = hunk.new_start;
 
             for line in &hunk.changes {
@@ -135,7 +158,14 @@ TAGS: [comma-separated relevant tags]
                     crate::core::diff_parser::ChangeType::Context => " ",
                 };
 
-                prompt.push_str(&format!("{}{:4} {}\n", prefix, line_num, line.content));
+                let rendered = format!("{}{:4} {}\n", prefix, line_num, line.content);
+                if max_diff_chars > 0 && diff_chars.saturating_add(rendered.len()) > max_diff_chars
+                {
+                    diff_truncated = true;
+                    break;
+                }
+                prompt.push_str(&rendered);
+                diff_chars = diff_chars.saturating_add(rendered.len());
 
                 if !matches!(
                     line.change_type,
@@ -146,6 +176,15 @@ TAGS: [comma-separated relevant tags]
             }
 
             prompt.push_str("```\n\n");
+            diff_chars = diff_chars.saturating_add("```\n\n".len());
+
+            if diff_truncated {
+                break;
+            }
+        }
+
+        if diff_truncated {
+            prompt.push_str("[Diff truncated]\n\n");
         }
 
         prompt.push_str("## Review Instructions\n\n");

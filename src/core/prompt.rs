@@ -9,6 +9,7 @@ pub struct PromptConfig {
     pub max_tokens: usize,
     pub include_context: bool,
     pub max_context_chars: usize,
+    pub max_diff_chars: usize,
 }
 
 impl Default for PromptConfig {
@@ -52,6 +53,7 @@ Line 28: Performance - O(n²) algorithm for large dataset. Will be slow with man
             max_tokens: 2000,
             include_context: true,
             max_context_chars: 20000,
+            max_diff_chars: 40000,
         }
     }
 }
@@ -88,10 +90,18 @@ impl PromptBuilder {
 
     fn format_diff(&self, diff: &UnifiedDiff) -> Result<String> {
         let mut output = String::new();
+        let mut truncated = false;
         output.push_str(&format!("File: {}\n", diff.file_path.display()));
 
-        for hunk in &diff.hunks {
-            output.push_str(&format!("{}\n", hunk.context));
+        'hunks: for hunk in &diff.hunks {
+            let header = format!("{}\n", hunk.context);
+            if self.config.max_diff_chars > 0
+                && output.len().saturating_add(header.len()) > self.config.max_diff_chars
+            {
+                truncated = true;
+                break;
+            }
+            output.push_str(&header);
 
             for change in &hunk.changes {
                 let prefix = match change.change_type {
@@ -99,8 +109,19 @@ impl PromptBuilder {
                     crate::core::diff_parser::ChangeType::Removed => "-",
                     crate::core::diff_parser::ChangeType::Context => " ",
                 };
-                output.push_str(&format!("{}{}\n", prefix, change.content));
+                let line = format!("{}{}\n", prefix, change.content);
+                if self.config.max_diff_chars > 0
+                    && output.len().saturating_add(line.len()) > self.config.max_diff_chars
+                {
+                    truncated = true;
+                    break 'hunks;
+                }
+                output.push_str(&line);
             }
+        }
+
+        if truncated {
+            output.push_str("[Diff truncated]\n");
         }
 
         Ok(output)

@@ -190,6 +190,10 @@ Create a `.diffscope.yml` file in your repository:
 model: gpt-4o
 temperature: 0.2
 max_tokens: 4000
+max_context_chars: 20000
+max_diff_chars: 40000
+max_context_chars: 20000  # 0 disables context truncation
+max_diff_chars: 40000     # 0 disables diff truncation
 system_prompt: "Focus on security vulnerabilities, performance issues, and best practices"
 openai_use_responses: true  # Use OpenAI Responses API (recommended) instead of chat completions
 
@@ -421,8 +425,8 @@ exclude_patterns:
   - "**/*.generated.*"
 
 # Review configuration
-max_diff_size: 10000
-context_lines: 3
+max_context_chars: 20000
+max_diff_chars: 40000
 ```
 
 ### Integration with Other CI Tools

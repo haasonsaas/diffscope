@@ -10,6 +10,8 @@ pub struct UnifiedDiff {
     pub new_content: Option<String>,
     pub hunks: Vec<DiffHunk>,
     pub is_binary: bool,
+    pub is_deleted: bool,
+    pub is_new: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +181,8 @@ impl DiffParser {
             new_content: Some(new_content.to_string()),
             hunks,
             is_binary: false,
+            is_deleted: false,
+            is_new: false,
         })
     }
 
@@ -188,12 +192,35 @@ impl DiffParser {
         *i += 1;
 
         let mut is_binary = false;
+        let mut is_deleted = false;
+        let mut is_new = false;
         while *i < lines.len()
             && !lines[*i].starts_with("@@")
             && !lines[*i].starts_with("diff --git")
         {
-            if lines[*i].starts_with("Binary files") || lines[*i].starts_with("GIT binary patch") {
+            let line = lines[*i];
+            if line.starts_with("Binary files") || line.starts_with("GIT binary patch") {
                 is_binary = true;
+            }
+            if line.starts_with("deleted file mode") {
+                is_deleted = true;
+            }
+            if line.starts_with("new file mode") {
+                is_new = true;
+            }
+            if line.starts_with("--- ") {
+                if let Ok(path) = Self::extract_path_from_header(line, "--- ") {
+                    if path == "/dev/null" {
+                        is_new = true;
+                    }
+                }
+            }
+            if line.starts_with("+++ ") {
+                if let Ok(path) = Self::extract_path_from_header(line, "+++ ") {
+                    if path == "/dev/null" {
+                        is_deleted = true;
+                    }
+                }
             }
             *i += 1;
         }
@@ -211,6 +238,8 @@ impl DiffParser {
             new_content: None,
             hunks,
             is_binary,
+            is_deleted,
+            is_new,
         })
     }
 
@@ -221,6 +250,8 @@ impl DiffParser {
         let old_path = Self::extract_path_from_header(old_line, "--- ")?;
         let new_path = Self::extract_path_from_header(new_line, "+++ ")?;
 
+        let is_new = old_path == "/dev/null";
+        let is_deleted = new_path == "/dev/null";
         let file_path = if new_path != "/dev/null" {
             new_path
         } else {
@@ -255,6 +286,8 @@ impl DiffParser {
             new_content: None,
             hunks,
             is_binary,
+            is_deleted,
+            is_new,
         })
     }
 
@@ -472,5 +505,39 @@ index 83db48f..f735c20 100644\n\
         let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].hunks.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_deleted_file() {
+        let diff_text = "\
+diff --git a/foo.txt b/foo.txt\n\
+deleted file mode 100644\n\
+index 83db48f..0000000\n\
+--- a/foo.txt\n\
++++ /dev/null\n\
+@@ -1,1 +0,0 @@\n\
+-hello\n";
+
+        let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
+        assert_eq!(diffs.len(), 1);
+        assert!(diffs[0].is_deleted);
+        assert!(!diffs[0].is_new);
+    }
+
+    #[test]
+    fn test_parse_new_file() {
+        let diff_text = "\
+diff --git a/foo.txt b/foo.txt\n\
+new file mode 100644\n\
+index 0000000..f735c20\n\
+--- /dev/null\n\
++++ b/foo.txt\n\
+@@ -0,0 +1,1 @@\n\
++hello\n";
+
+        let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
+        assert_eq!(diffs.len(), 1);
+        assert!(diffs[0].is_new);
+        assert!(!diffs[0].is_deleted);
     }
 }

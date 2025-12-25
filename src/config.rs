@@ -14,6 +14,12 @@ pub struct Config {
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
 
+    #[serde(default = "default_max_context_chars")]
+    pub max_context_chars: usize,
+
+    #[serde(default = "default_max_diff_chars")]
+    pub max_diff_chars: usize,
+
     pub system_prompt: Option<String>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -78,6 +84,8 @@ impl Default for Config {
             model: default_model(),
             temperature: default_temperature(),
             max_tokens: default_max_tokens(),
+            max_context_chars: default_max_context_chars(),
+            max_diff_chars: default_max_diff_chars(),
             system_prompt: None,
             api_key: None,
             base_url: None,
@@ -228,6 +236,14 @@ fn default_temperature() -> f32 {
 
 fn default_max_tokens() -> usize {
     4000
+}
+
+fn default_max_context_chars() -> usize {
+    20000
+}
+
+fn default_max_diff_chars() -> usize {
+    40000
 }
 
 fn default_true() -> bool {
