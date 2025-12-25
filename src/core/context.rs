@@ -41,10 +41,16 @@ impl ContextFetcher {
         if full_path.exists() {
             let content = tokio::fs::read_to_string(&full_path).await?;
             let file_lines: Vec<&str> = content.lines().collect();
+            let merged_ranges = merge_ranges(lines);
 
-            for (start, end) in lines {
+            for (start, end) in merged_ranges {
+                if file_lines.is_empty() {
+                    break;
+                }
+                let start = start.max(1);
+                let end = end.max(start);
                 let start_idx = start.saturating_sub(1);
-                let end_idx = (*end).min(file_lines.len());
+                let end_idx = end.min(file_lines.len());
 
                 if start_idx < file_lines.len() {
                     let chunk_content = file_lines[start_idx..end_idx].join("\n");
@@ -52,7 +58,7 @@ impl ContextFetcher {
                         file_path: file_path.clone(),
                         content: chunk_content,
                         context_type: ContextType::FileContent,
-                        line_range: Some((*start, *end)),
+                        line_range: Some((start, end)),
                     });
                 }
             }
@@ -163,4 +169,27 @@ impl ContextFetcher {
 
         Ok(chunks)
     }
+}
+
+fn merge_ranges(lines: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = lines.to_vec();
+    ranges.sort_by_key(|(start, _)| *start);
+
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges {
+        let end = end.max(start);
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1.saturating_add(1) {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+
+    merged
 }

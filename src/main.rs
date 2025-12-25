@@ -288,7 +288,7 @@ async fn review_command(
                 &diff
                     .hunks
                     .iter()
-                    .map(|h| (h.new_start, h.new_start + h.new_lines))
+                    .map(|h| (h.new_start, h.new_start + h.new_lines.saturating_sub(1)))
                     .collect::<Vec<_>>(),
             )
             .await?;
@@ -801,7 +801,7 @@ async fn review_diff_content_raw(
                 &diff
                     .hunks
                     .iter()
-                    .map(|h| (h.new_start, h.new_start + h.new_lines))
+                    .map(|h| (h.new_start, h.new_start + h.new_lines.saturating_sub(1)))
                     .collect::<Vec<_>>(),
             )
             .await?;
@@ -1232,7 +1232,7 @@ async fn smart_review_command(
                 &diff
                     .hunks
                     .iter()
-                    .map(|h| (h.new_start, h.new_start + h.new_lines))
+                    .map(|h| (h.new_start, h.new_start + h.new_lines.saturating_sub(1)))
                     .collect::<Vec<_>>(),
             )
             .await?;
