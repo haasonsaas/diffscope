@@ -225,6 +225,79 @@ exclude_patterns:
 
 Set `symbol_index_provider: lsp` to use a language server; it falls back to regex indexing if the LSP binary is missing. Configure `symbol_index_lsp_languages` and `symbol_index_lsp_command` to match your server (for example, `typescript-language-server --stdio` with `ts`/`tsx` language IDs).
 
+### LSP Symbol Index Examples (All Common Languages)
+
+Pick one LSP server per run (one `symbol_index_lsp_command`). Update the language map to match the server you installed.
+
+```yaml
+# Rust (rust-analyzer)
+symbol_index_provider: lsp
+symbol_index_lsp_command: rust-analyzer
+symbol_index_lsp_languages:
+  rs: rust
+
+# TypeScript / JavaScript (typescript-language-server)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: "typescript-language-server --stdio"
+# symbol_index_lsp_languages:
+#   ts: typescript
+#   tsx: typescriptreact
+#   js: javascript
+#   jsx: javascriptreact
+
+# Python (python-lsp-server / pylsp)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: pylsp
+# symbol_index_lsp_languages:
+#   py: python
+#   pyi: python
+
+# Go (gopls)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: gopls
+# symbol_index_lsp_languages:
+#   go: go
+
+# Java (Eclipse JDT LS)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: "jdtls -configuration /path/to/config -data /path/to/workspace"
+# symbol_index_lsp_languages:
+#   java: java
+
+# Kotlin (Kotlin LSP)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: "kotlin-lsp.sh --stdio"
+# symbol_index_lsp_languages:
+#   kt: kotlin
+
+# C / C++ (clangd)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: clangd
+# symbol_index_lsp_languages:
+#   c: c
+#   h: c
+#   cpp: cpp
+#   hpp: cpp
+
+# C# (csharp-ls)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: csharp-ls
+# symbol_index_lsp_languages:
+#   cs: csharp
+
+# Ruby (solargraph)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: "solargraph stdio"
+# symbol_index_lsp_languages:
+#   rb: ruby
+
+# PHP (Phpactor)
+# symbol_index_provider: lsp
+# symbol_index_lsp_command: "phpactor language-server"
+# symbol_index_lsp_languages:
+#   php: php
+```
+
 ## Plugin Development
 
 Create custom analyzers:
