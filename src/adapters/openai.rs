@@ -21,6 +21,15 @@ struct OpenAIRequest {
     max_tokens: usize,
 }
 
+#[derive(Serialize)]
+struct OpenAIResponsesRequest {
+    model: String,
+    input: String,
+    instructions: String,
+    temperature: f32,
+    max_output_tokens: usize,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Message {
     role: String,
@@ -35,6 +44,29 @@ struct OpenAIResponse {
 }
 
 #[derive(Deserialize)]
+struct OpenAIResponsesResponse {
+    output: Vec<OpenAIResponseOutput>,
+    model: String,
+    #[serde(default)]
+    usage: Option<OpenAIResponsesUsage>,
+}
+
+#[derive(Deserialize)]
+struct OpenAIResponseOutput {
+    #[serde(rename = "type")]
+    output_type: String,
+    #[serde(default)]
+    content: Vec<OpenAIResponseContent>,
+}
+
+#[derive(Deserialize)]
+struct OpenAIResponseContent {
+    #[serde(rename = "type")]
+    content_type: String,
+    text: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct Choice {
     message: Message,
 }
@@ -43,6 +75,13 @@ struct Choice {
 struct OpenAIUsage {
     prompt_tokens: usize,
     completion_tokens: usize,
+    total_tokens: usize,
+}
+
+#[derive(Deserialize)]
+struct OpenAIResponsesUsage {
+    input_tokens: usize,
+    output_tokens: usize,
     total_tokens: usize,
 }
 
@@ -109,6 +148,32 @@ impl OpenAIAdapter {
 #[async_trait]
 impl LLMAdapter for OpenAIAdapter {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
+        if should_use_responses_api(&self.config) {
+            return self.complete_responses(request).await;
+        }
+
+        self.complete_chat_completions(request).await
+    }
+
+    fn _model_name(&self) -> &str {
+        &self.config.model_name
+    }
+}
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+fn should_use_responses_api(config: &ModelConfig) -> bool {
+    if let Some(flag) = config.openai_use_responses {
+        return flag;
+    }
+
+    !config.model_name.starts_with("gpt-3.5")
+}
+
+impl OpenAIAdapter {
+    async fn complete_chat_completions(&self, request: LLMRequest) -> Result<LLMResponse> {
         let messages = vec![
             Message {
                 role: "system".to_string(),
@@ -161,11 +226,65 @@ impl LLMAdapter for OpenAIAdapter {
         })
     }
 
-    fn _model_name(&self) -> &str {
-        &self.config.model_name
+    async fn complete_responses(&self, request: LLMRequest) -> Result<LLMResponse> {
+        let openai_request = OpenAIResponsesRequest {
+            model: self.config.model_name.clone(),
+            input: request.user_prompt,
+            instructions: request.system_prompt,
+            temperature: request.temperature.unwrap_or(self.config.temperature),
+            max_output_tokens: request.max_tokens.unwrap_or(self.config.max_tokens),
+        };
+
+        let url = format!("{}/responses", self.base_url);
+        let response = self
+            .send_with_retry(|| {
+                self.client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", self.api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&openai_request)
+            })
+            .await
+            .context("Failed to send request to OpenAI")?;
+
+        let openai_response: OpenAIResponsesResponse = response
+            .json()
+            .await
+            .context("Failed to parse OpenAI response")?;
+
+        let content = extract_response_text(&openai_response);
+        let usage = openai_response.usage.map(|usage| Usage {
+            prompt_tokens: usage.input_tokens,
+            completion_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens,
+        });
+
+        Ok(LLMResponse {
+            content,
+            model: openai_response.model,
+            usage,
+        })
     }
 }
 
-fn is_retryable_status(status: StatusCode) -> bool {
-    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+fn extract_response_text(response: &OpenAIResponsesResponse) -> String {
+    let mut combined = String::new();
+
+    for item in &response.output {
+        if item.output_type != "message" {
+            continue;
+        }
+        for content in &item.content {
+            if content.content_type == "output_text" {
+                if let Some(text) = &content.text {
+                    if !combined.is_empty() {
+                        combined.push('\n');
+                    }
+                    combined.push_str(text);
+                }
+            }
+        }
+    }
+
+    combined
 }

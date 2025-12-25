@@ -9,6 +9,7 @@ max_tokens: 4000
 # API configuration (optional - can use environment variables)
 # api_key: your-api-key-here
 # base_url: https://api.openai.com/v1
+# openai_use_responses: true  # Use OpenAI Responses API instead of chat completions
 
 # Global exclude patterns
 exclude_patterns:

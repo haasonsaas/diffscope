@@ -9,6 +9,7 @@ pub struct ModelConfig {
     pub base_url: Option<String>,
     pub temperature: f32,
     pub max_tokens: usize,
+    pub openai_use_responses: Option<bool>,
 }
 
 impl Default for ModelConfig {
@@ -19,6 +20,7 @@ impl Default for ModelConfig {
             base_url: None,
             temperature: 0.2,
             max_tokens: 4000,
+            openai_use_responses: None,
         }
     }
 }

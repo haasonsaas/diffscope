@@ -240,6 +240,7 @@ async fn review_command(
         base_url: config.base_url.clone(),
         temperature: config.temperature,
         max_tokens: config.max_tokens,
+        openai_use_responses: config.openai_use_responses,
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -498,6 +499,7 @@ async fn pr_command(
             base_url: config.base_url.clone(),
             temperature: config.temperature,
             max_tokens: config.max_tokens,
+            openai_use_responses: config.openai_use_responses,
         };
 
         let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -560,6 +562,7 @@ async fn suggest_commit_message(config: config::Config) -> Result<()> {
         base_url: config.base_url.clone(),
         temperature: config.temperature,
         max_tokens: config.max_tokens,
+        openai_use_responses: config.openai_use_responses,
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -608,6 +611,7 @@ async fn suggest_pr_title(config: config::Config) -> Result<()> {
         base_url: config.base_url.clone(),
         temperature: config.temperature,
         max_tokens: config.max_tokens,
+        openai_use_responses: config.openai_use_responses,
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -742,6 +746,7 @@ async fn review_diff_content_raw(
         base_url: config.base_url.clone(),
         temperature: config.temperature,
         max_tokens: config.max_tokens,
+        openai_use_responses: config.openai_use_responses,
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
@@ -1164,6 +1169,7 @@ async fn smart_review_command(
         base_url: config.base_url.clone(),
         temperature: config.temperature,
         max_tokens: config.max_tokens,
+        openai_use_responses: config.openai_use_responses,
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;

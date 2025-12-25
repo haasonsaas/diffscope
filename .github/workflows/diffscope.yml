@@ -53,6 +53,7 @@ jobs:
                 body: `**${comment.severity}**: ${comment.content}`,
                 commit_id: headSha,
                 path: comment.file_path,
-                line: comment.line_number
+                line: comment.line_number,
+                side: "RIGHT"
               });
             }

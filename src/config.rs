@@ -19,6 +19,9 @@ pub struct Config {
     pub base_url: Option<String>,
 
     #[serde(default)]
+    pub openai_use_responses: Option<bool>,
+
+    #[serde(default)]
     pub plugins: PluginConfig,
 
     #[serde(default)]
@@ -78,6 +81,7 @@ impl Default for Config {
             system_prompt: None,
             api_key: None,
             base_url: None,
+            openai_use_responses: None,
             plugins: PluginConfig::default(),
             exclude_patterns: Vec::new(),
             paths: HashMap::new(),

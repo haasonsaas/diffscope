@@ -182,6 +182,7 @@ model: gpt-4o
 temperature: 0.2
 max_tokens: 4000
 system_prompt: "Focus on security vulnerabilities, performance issues, and best practices"
+openai_use_responses: true  # Use OpenAI Responses API (recommended) instead of chat completions
 
 # Built-in plugins (enabled by default)
 plugins:
