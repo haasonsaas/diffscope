@@ -49,6 +49,12 @@ impl DiffParser {
             if lines[i].starts_with("diff --git") {
                 let diff = Self::parse_single_file_diff(&lines, &mut i)?;
                 diffs.push(diff);
+            } else if lines[i].starts_with("--- ")
+                && i + 1 < lines.len()
+                && lines[i + 1].starts_with("+++ ")
+            {
+                let diff = Self::parse_simple_file_diff(&lines, &mut i)?;
+                diffs.push(diff);
             } else {
                 i += 1;
             }
@@ -173,7 +179,11 @@ impl DiffParser {
         let file_path = Self::extract_file_path(file_line)?;
         *i += 1;
 
+        let mut is_binary = false;
         while *i < lines.len() && !lines[*i].starts_with("@@") && !lines[*i].starts_with("diff --git") {
+            if lines[*i].starts_with("Binary files") || lines[*i].starts_with("GIT binary patch") {
+                is_binary = true;
+            }
             *i += 1;
         }
 
@@ -189,7 +199,51 @@ impl DiffParser {
             old_content: None,
             new_content: None,
             hunks,
-            is_binary: false,
+            is_binary,
+        })
+    }
+
+    fn parse_simple_file_diff(lines: &[&str], i: &mut usize) -> Result<UnifiedDiff> {
+        let old_line = lines[*i];
+        let new_line = lines.get(*i + 1).unwrap_or(&"");
+
+        let old_path = Self::extract_path_from_header(old_line, "--- ")?;
+        let new_path = Self::extract_path_from_header(new_line, "+++ ")?;
+
+        let file_path = if new_path != "/dev/null" {
+            new_path
+        } else {
+            old_path
+        };
+
+        *i += 2;
+
+        let mut hunks = Vec::new();
+        let mut is_binary = false;
+
+        while *i < lines.len()
+            && !lines[*i].starts_with("diff --git")
+            && !(lines[*i].starts_with("--- ")
+                && *i + 1 < lines.len()
+                && lines[*i + 1].starts_with("+++ "))
+        {
+            if lines[*i].starts_with("Binary files") || lines[*i].starts_with("GIT binary patch") {
+                is_binary = true;
+            }
+            if lines[*i].starts_with("@@") {
+                let hunk = Self::parse_hunk(lines, i)?;
+                hunks.push(hunk);
+            } else {
+                *i += 1;
+            }
+        }
+
+        Ok(UnifiedDiff {
+            file_path: PathBuf::from(file_path),
+            old_content: None,
+            new_content: None,
+            hunks,
+            is_binary,
         })
     }
 
@@ -202,6 +256,15 @@ impl DiffParser {
         }
     }
 
+    fn extract_path_from_header(line: &str, prefix: &str) -> Result<String> {
+        let raw = line
+            .strip_prefix(prefix)
+            .ok_or_else(|| anyhow::anyhow!("Invalid file header: {}", line))?
+            .trim();
+        let path = raw.split_whitespace().next().unwrap_or(raw);
+        Ok(path.trim_start_matches("a/").trim_start_matches("b/").to_string())
+    }
+
     fn parse_hunk(lines: &[&str], i: &mut usize) -> Result<DiffHunk> {
         let header = lines[*i];
         let (old_start, old_lines, new_start, new_lines) = Self::parse_hunk_header(header)?;
@@ -211,7 +274,12 @@ impl DiffParser {
         let mut old_line = old_start;
         let mut new_line = new_start;
 
-        while *i < lines.len() && !lines[*i].starts_with("@@") && !lines[*i].starts_with("diff --git") {
+        while *i < lines.len()
+            && !lines[*i].starts_with("@@")
+            && !lines[*i].starts_with("diff --git")
+            && !lines[*i].starts_with("--- ")
+            && !lines[*i].starts_with("+++ ")
+        {
             let line = lines[*i];
             if line.is_empty() {
                 *i += 1;
@@ -301,5 +369,20 @@ mod tests {
         
         assert_eq!(diff.file_path, PathBuf::from("test.txt"));
         assert!(!diff.hunks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_unified_diff_without_git_header() {
+        let diff_text = "\
+--- a/foo.txt\n\
++++ b/foo.txt\n\
+@@ -1,1 +1,1 @@\n\
+-hello\n\
++world\n";
+
+        let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].file_path, PathBuf::from("foo.txt"));
+        assert_eq!(diffs[0].hunks.len(), 1);
     }
 }

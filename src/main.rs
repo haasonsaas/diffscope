@@ -223,6 +223,10 @@ async fn review_command(
             info!("Skipping excluded file: {}", diff.file_path.display());
             continue;
         }
+        if diff.is_binary || diff.hunks.is_empty() {
+            info!("Skipping non-text diff: {}", diff.file_path.display());
+            continue;
+        }
         
         let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
@@ -692,6 +696,10 @@ async fn review_diff_content_raw(
             info!("Skipping excluded file: {}", diff.file_path.display());
             continue;
         }
+        if diff.is_binary || diff.hunks.is_empty() {
+            info!("Skipping non-text diff: {}", diff.file_path.display());
+            continue;
+        }
 
         let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
@@ -785,7 +793,9 @@ async fn review_diff_content_raw(
 
 fn parse_llm_response(content: &str, file_path: &PathBuf) -> Result<Vec<core::comment::RawComment>> {
     let mut comments = Vec::new();
-    let line_pattern = regex::Regex::new(r"(?i)line\s+(\d+):\s*(.+)")?;
+    static LINE_PATTERN: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?i)line\s+(\d+):\s*(.+)").unwrap()
+    });
     
     for line in content.lines() {
         let trimmed = line.trim();
@@ -801,7 +811,7 @@ fn parse_llm_response(content: &str, file_path: &PathBuf) -> Result<Vec<core::co
             continue;
         }
         
-        if let Some(caps) = line_pattern.captures(line) {
+        if let Some(caps) = LINE_PATTERN.captures(line) {
             let line_number: usize = caps.get(1).unwrap().as_str().parse()?;
             let comment_text = caps.get(2).unwrap().as_str().trim();
             
@@ -867,6 +877,9 @@ fn format_as_patch(comments: &[core::Comment]) -> String {
             comment.severity,
             comment.content
         ));
+        if let Some(suggestion) = &comment.suggestion {
+            output.push_str(&format!("# Suggestion: {}\n", suggestion));
+        }
     }
     output
 }
@@ -886,8 +899,13 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
     
     // Severity breakdown
     output.push_str("### Issues by Severity\n\n");
-    for (severity, count) in &summary.by_severity {
-        let emoji = match severity.as_str() {
+    let severity_order = ["Error", "Warning", "Info", "Suggestion"];
+    for severity in severity_order {
+        let count = summary.by_severity.get(severity).copied().unwrap_or(0);
+        if count == 0 {
+            continue;
+        }
+        let emoji = match severity {
             "Error" => "🔴",
             "Warning" => "🟡", 
             "Info" => "🔵",
@@ -900,8 +918,23 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
     
     // Category breakdown  
     output.push_str("### Issues by Category\n\n");
-    for (category, count) in &summary.by_category {
-        let emoji = match category.as_str() {
+    let category_order = [
+        "Security",
+        "Performance",
+        "Bug",
+        "Maintainability",
+        "Testing",
+        "Style",
+        "Documentation",
+        "Architecture",
+        "BestPractice",
+    ];
+    for category in category_order {
+        let count = summary.by_category.get(category).copied().unwrap_or(0);
+        if count == 0 {
+            continue;
+        }
+        let emoji = match category {
             "Security" => "🔒",
             "Performance" => "⚡",
             "Bug" => "🐛",
@@ -1034,6 +1067,10 @@ async fn smart_review_command(
         // Check if file should be excluded
         if config.should_exclude(&diff.file_path) {
             info!("Skipping excluded file: {}", diff.file_path.display());
+            continue;
+        }
+        if diff.is_binary || diff.hunks.is_empty() {
+            info!("Skipping non-text diff: {}", diff.file_path.display());
             continue;
         }
         
@@ -1443,15 +1480,16 @@ fn format_detailed_comment(comment: &core::Comment) -> String {
         comment.category
     ));
     
-    output.push_str(&format!("**Confidence:** {:.0}% | ", comment.confidence * 100.0));
-    if !comment.tags.is_empty() {
-        output.push_str("**Tags:** ");
+    if comment.tags.is_empty() {
+        output.push_str(&format!("**Confidence:** {:.0}%\n\n", comment.confidence * 100.0));
+    } else {
+        output.push_str(&format!("**Confidence:** {:.0}% | **Tags:** ", comment.confidence * 100.0));
         for (i, tag) in comment.tags.iter().enumerate() {
             if i > 0 { output.push_str(", "); }
             output.push_str(&format!("`{}`", tag));
         }
+        output.push_str("\n\n");
     }
-    output.push_str("\n\n");
     
     output.push_str(&format!("{}\n\n", comment.content));
     
