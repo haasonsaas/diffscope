@@ -1,4 +1,6 @@
 use anyhow::Result;
+use ignore::WalkBuilder;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
@@ -33,93 +35,92 @@ impl SymbolIndex {
             return Ok(index);
         }
 
-        let patterns = build_symbol_patterns()?;
-        let mut stack = vec![repo_root.to_path_buf()];
+        let walker = WalkBuilder::new(repo_root)
+            .hidden(true)
+            .ignore(true)
+            .git_ignore(true)
+            .git_exclude(true)
+            .git_global(true)
+            .build();
+
         let mut files_seen = 0usize;
 
-        while let Some(dir) = stack.pop() {
-            let entries = match fs::read_dir(&dir) {
-                Ok(entries) => entries,
-                Err(_) => continue,
+        for entry in walker.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if files_seen >= max_files {
+                break;
+            }
+
+            let relative = path
+                .strip_prefix(repo_root)
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|_| path.to_path_buf());
+            if should_exclude(&relative) {
+                continue;
+            }
+
+            let extension = match path.extension().and_then(|ext| ext.to_str()) {
+                Some(ext) => ext,
+                None => continue,
+            };
+            let patterns = match patterns_for_extension(extension) {
+                Some(patterns) => patterns,
+                None => continue,
             };
 
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if should_skip_dir(&path) {
-                        continue;
-                    }
-                    stack.push(path);
-                    continue;
-                }
+            let metadata = match fs::metadata(path) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.len() as usize > max_bytes {
+                continue;
+            }
 
-                if files_seen >= max_files {
-                    return Ok(index);
-                }
+            let bytes = match fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            if bytes.iter().take(2048).any(|b| *b == 0) {
+                continue;
+            }
 
-                if !is_supported_file(&path) {
-                    continue;
-                }
+            let content = String::from_utf8_lossy(&bytes);
+            let lines: Vec<&str> = content.lines().collect();
+            let mut file_added = false;
 
-                let relative = path
-                    .strip_prefix(repo_root)
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|_| path.clone());
-                if should_exclude(&relative) {
-                    continue;
-                }
-
-                let metadata = match fs::metadata(&path) {
-                    Ok(metadata) => metadata,
-                    Err(_) => continue,
-                };
-                if metadata.len() as usize > max_bytes {
-                    continue;
-                }
-
-                let bytes = match fs::read(&path) {
-                    Ok(bytes) => bytes,
-                    Err(_) => continue,
-                };
-                if bytes.iter().take(2048).any(|b| *b == 0) {
-                    continue;
-                }
-
-                let content = String::from_utf8_lossy(&bytes);
-                let lines: Vec<&str> = content.lines().collect();
-                let mut file_added = false;
-
-                for (idx, line) in lines.iter().enumerate() {
-                    for pattern in &patterns {
-                        if let Some(caps) = pattern.captures(line) {
-                            if let Some(name) = caps.get(1) {
-                                let symbol = name.as_str().to_string();
-                                if symbol.len() < 2 {
-                                    continue;
-                                }
-                                let entry = index.symbols.entry(symbol).or_default();
-                                if entry.len() >= max_locations {
-                                    continue;
-                                }
-
-                                let start = idx.saturating_sub(2);
-                                let end = (idx + 3).min(lines.len().saturating_sub(1));
-                                let snippet = lines[start..=end].join("\n");
-                                entry.push(SymbolLocation {
-                                    file_path: relative.clone(),
-                                    line_range: (start + 1, end + 1),
-                                    snippet,
-                                });
-                                file_added = true;
+            for (idx, line) in lines.iter().enumerate() {
+                for pattern in patterns {
+                    if let Some(caps) = pattern.captures(line) {
+                        if let Some(name) = caps.get(1) {
+                            let symbol = name.as_str().to_string();
+                            if symbol.len() < 2 {
+                                continue;
                             }
+                            let entry = index.symbols.entry(symbol).or_default();
+                            if entry.len() >= max_locations {
+                                continue;
+                            }
+
+                            let start = idx.saturating_sub(2);
+                            let end = (idx + 3).min(lines.len().saturating_sub(1));
+                            let snippet = lines[start..=end].join("\n");
+                            entry.push(SymbolLocation {
+                                file_path: relative.clone(),
+                                line_range: (start + 1, end + 1),
+                                snippet,
+                            });
+                            file_added = true;
                         }
                     }
                 }
+            }
 
-                if file_added {
-                    files_seen += 1;
-                    index.files_indexed += 1;
-                }
+            if file_added {
+                files_seen += 1;
+                index.files_indexed += 1;
             }
         }
 
@@ -139,52 +140,120 @@ impl SymbolIndex {
     }
 }
 
-fn build_symbol_patterns() -> Result<Vec<Regex>> {
-    Ok(vec![
-        Regex::new(
+static SYMBOL_PATTERNS: Lazy<HashMap<&'static str, Vec<Regex>>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+
+    map.insert(
+        "rs",
+        vec![Regex::new(
             r"^\s*(?:pub\s+)?(?:fn|struct|enum|trait|type|impl)\s+([A-Za-z_][A-Za-z0-9_]*)",
-        )?,
-        Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)")?,
-        Regex::new(r"^\s*(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)")?,
-        Regex::new(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)")?,
-        Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)")?,
-        Regex::new(r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)")?,
-        Regex::new(
-            r"^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)",
-        )?,
-    ])
-}
-
-fn is_supported_file(path: &Path) -> bool {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some(ext) => matches!(
-            ext,
-            "rs" | "py"
-                | "js"
-                | "ts"
-                | "tsx"
-                | "go"
-                | "java"
-                | "kt"
-                | "cs"
-                | "cpp"
-                | "c"
-                | "h"
-                | "hpp"
-                | "rb"
-                | "php"
-        ),
-        None => false,
-    }
-}
-
-fn should_skip_dir(path: &Path) -> bool {
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        matches!(
-            name,
-            ".git" | "node_modules" | "target" | "dist" | "build" | ".venv" | "venv"
         )
-    } else {
-        false
-    }
+        .unwrap()],
+    );
+
+    map.insert(
+        "py",
+        vec![
+            Regex::new(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+            Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+        ],
+    );
+
+    map.insert(
+        "go",
+        vec![
+            Regex::new(r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+            Regex::new(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+").unwrap(),
+        ],
+    );
+
+    map.insert(
+        "js",
+        vec![
+            Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap(),
+            Regex::new(r"^\s*(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*\(").unwrap(),
+        ],
+    );
+
+    map.insert(
+        "ts",
+        vec![
+            Regex::new(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap(),
+            Regex::new(r"^\s*(?:export\s+)?interface\s+([A-Za-z_$][A-Za-z0-9_$]*)").unwrap(),
+            Regex::new(r"^\s*(?:export\s+)?type\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=").unwrap(),
+        ],
+    );
+    map.insert("tsx", map.get("ts").cloned().unwrap_or_default());
+
+    map.insert(
+        "java",
+        vec![
+            Regex::new(r"^\s*(?:public|protected|private)?\s*(?:abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:public|protected|private)?\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:public|protected|private)?\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+        ],
+    );
+
+    map.insert(
+        "kt",
+        vec![
+            Regex::new(r"^\s*(?:public|private|protected)?\s*class\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:public|private|protected)?\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+            Regex::new(r"^\s*fun\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+        ],
+    );
+
+    map.insert(
+        "cs",
+        vec![
+            Regex::new(r"^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:public|private|protected|internal)?\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+            Regex::new(r"^\s*(?:public|private|protected|internal)?\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .unwrap(),
+        ],
+    );
+
+    map.insert(
+        "cpp",
+        vec![Regex::new(r"^\s*(?:class|struct)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap()],
+    );
+    map.insert("hpp", map.get("cpp").cloned().unwrap_or_default());
+    map.insert("h", map.get("cpp").cloned().unwrap_or_default());
+    map.insert("c", map.get("cpp").cloned().unwrap_or_default());
+
+    map.insert(
+        "rb",
+        vec![
+            Regex::new(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_!?=]*)").unwrap(),
+            Regex::new(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+            Regex::new(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+        ],
+    );
+
+    map.insert(
+        "php",
+        vec![
+            Regex::new(r"^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+            Regex::new(r"^\s*(?:abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+            Regex::new(r"^\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+            Regex::new(r"^\s*trait\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap(),
+        ],
+    );
+
+    map
+});
+
+fn patterns_for_extension(ext: &str) -> Option<&'static Vec<Regex>> {
+    SYMBOL_PATTERNS.get(ext)
 }

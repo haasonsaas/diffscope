@@ -18,6 +18,7 @@ impl Default for SummaryOptions {
 }
 
 impl PRSummaryGenerator {
+    #[allow(dead_code)]
     pub async fn generate_summary(
         diffs: &[UnifiedDiff],
         git: &GitIntegration,
@@ -52,6 +53,37 @@ impl PRSummaryGenerator {
 
         // Parse AI response into structured summary
         Self::parse_summary_response(&response.content, stats)
+    }
+
+    pub async fn generate_change_diagram(
+        diffs: &[UnifiedDiff],
+        adapter: &Box<dyn LLMAdapter>,
+    ) -> Result<Option<String>> {
+        let stats = Self::calculate_stats(diffs);
+        let prompt = Self::build_diagram_prompt(diffs, &stats);
+        let request = LLMRequest {
+            system_prompt: "You create concise Mermaid diagrams for code changes. Respond with a single mermaid diagram or 'none'.".to_string(),
+            user_prompt: prompt,
+            temperature: Some(0.2),
+            max_tokens: Some(800),
+        };
+
+        let response = adapter.complete(request).await?;
+        Ok(extract_mermaid_block(&response.content))
+    }
+
+    pub fn build_diagram_only_summary(diffs: &[UnifiedDiff], diagram: String) -> PRSummary {
+        let stats = Self::calculate_stats(diffs);
+        PRSummary {
+            title: "Change Diagram".to_string(),
+            description: String::new(),
+            change_type: ChangeType::Chore,
+            key_changes: Vec::new(),
+            breaking_changes: None,
+            testing_notes: String::new(),
+            stats,
+            visual_diff: Some(diagram),
+        }
     }
 
     fn calculate_stats(diffs: &[UnifiedDiff]) -> ChangeStats {
@@ -149,6 +181,50 @@ impl PRSummaryGenerator {
             prompt.push_str(
                 "6. A Mermaid diagram (sequence or flowchart) summarizing the change if helpful\n",
             );
+        }
+
+        prompt
+    }
+
+    fn build_diagram_prompt(diffs: &[UnifiedDiff], stats: &ChangeStats) -> String {
+        let mut prompt = String::new();
+        prompt.push_str(
+            "Create a single Mermaid flowchart or sequence diagram that summarizes the change.\n",
+        );
+        prompt.push_str(
+            "Use only one mermaid code block. If a diagram isn't useful, reply with 'none'.\n\n",
+        );
+        prompt.push_str("## Statistics\n");
+        prompt.push_str(&format!("- Files changed: {}\n", stats.files_changed));
+        prompt.push_str(&format!("- Lines added: {}\n", stats.lines_added));
+        prompt.push_str(&format!("- Lines removed: {}\n", stats.lines_removed));
+
+        prompt.push_str("\n## Files Changed\n");
+        for diff in diffs.iter().take(20) {
+            let path = diff.file_path.display();
+            let added = diff
+                .hunks
+                .iter()
+                .flat_map(|h| &h.changes)
+                .filter(|c| matches!(c.change_type, crate::core::diff_parser::ChangeType::Added))
+                .count();
+            let removed = diff
+                .hunks
+                .iter()
+                .flat_map(|h| &h.changes)
+                .filter(|c| matches!(c.change_type, crate::core::diff_parser::ChangeType::Removed))
+                .count();
+            let status = if diff.is_deleted {
+                "deleted"
+            } else if diff.is_new {
+                "new"
+            } else {
+                "modified"
+            };
+            prompt.push_str(&format!(
+                "- {} ({}; +{}, -{})\n",
+                path, status, added, removed
+            ));
         }
 
         prompt
@@ -393,4 +469,49 @@ fn extract_mermaid_diagram(content: &str) -> Option<String> {
     }
 
     None
+}
+
+fn extract_mermaid_block(content: &str) -> Option<String> {
+    if content.to_lowercase().contains("none") {
+        return None;
+    }
+    if let Some(diagram) = extract_mermaid_diagram(content) {
+        return Some(diagram);
+    }
+
+    let mut in_block = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") && trimmed.contains("mermaid") {
+            in_block = true;
+            continue;
+        }
+        if trimmed.starts_with("```") && in_block {
+            break;
+        }
+        if in_block {
+            lines.push(line);
+        }
+    }
+    let diagram = lines.join("\n").trim().to_string();
+    if !diagram.is_empty() {
+        return Some(diagram);
+    }
+
+    let fallback = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("flowchart")
+                || trimmed.starts_with("graph")
+                || trimmed.starts_with("sequenceDiagram")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if fallback.trim().is_empty() {
+        None
+    } else {
+        Some(fallback)
+    }
 }

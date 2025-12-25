@@ -12,8 +12,8 @@ review_profile: balanced  # balanced | chill | assertive
 review_instructions: |
   Prioritize security and correctness issues. Avoid stylistic comments unless they impact maintainability.
 smart_review_summary: true   # Include AI-generated PR summary in smart-review output
-smart_review_diagram: false  # Include Mermaid diagram in PR summary (smart-review)
-symbol_index: true           # Build repo symbol index for cross-file context
+smart_review_diagram: false  # Generate a Mermaid diagram in smart-review output
+symbol_index: true           # Build repo symbol index for cross-file context (respects .gitignore)
 symbol_index_max_files: 500
 symbol_index_max_bytes: 200000
 symbol_index_max_locations: 5

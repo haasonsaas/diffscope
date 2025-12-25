@@ -586,7 +586,13 @@ async fn pr_command(
         };
 
         let adapter = adapters::llm::create_adapter(&model_config)?;
-        let pr_summary = core::PRSummaryGenerator::generate_summary(&diffs, &git, &adapter).await?;
+        let options = core::SummaryOptions {
+            include_diagram: config.smart_review_diagram,
+        };
+        let pr_summary = core::PRSummaryGenerator::generate_summary_with_options(
+            &diffs, &git, &adapter, options,
+        )
+        .await?;
 
         println!("{}", pr_summary.to_markdown());
         return Ok(());
@@ -1295,11 +1301,11 @@ async fn smart_review_command(
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
     let mut all_comments = Vec::new();
-    let pr_summary = if config.smart_review_summary {
+    let mut pr_summary = if config.smart_review_summary {
         match core::GitIntegration::new(&repo_root) {
             Ok(git) => {
                 let options = core::SummaryOptions {
-                    include_diagram: config.smart_review_diagram,
+                    include_diagram: false,
                 };
                 match core::PRSummaryGenerator::generate_summary_with_options(
                     &diffs, &git, &adapter, options,
@@ -1321,6 +1327,22 @@ async fn smart_review_command(
     } else {
         None
     };
+
+    if config.smart_review_diagram {
+        match core::PRSummaryGenerator::generate_change_diagram(&diffs, &adapter).await {
+            Ok(Some(diagram)) => {
+                if let Some(summary) = &mut pr_summary {
+                    summary.visual_diff = Some(diagram);
+                } else {
+                    pr_summary = Some(core::PRSummaryGenerator::build_diagram_only_summary(
+                        &diffs, diagram,
+                    ));
+                }
+            }
+            Ok(None) => {}
+            Err(err) => warn!("Diagram generation failed: {}", err),
+        }
+    }
 
     for diff in &diffs {
         // Check if file should be excluded
