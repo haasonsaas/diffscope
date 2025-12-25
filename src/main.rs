@@ -182,6 +182,16 @@ async fn review_command(
     format: OutputFormat,
 ) -> Result<()> {
     info!("Starting diff review with model: {}", config.model);
+
+    let repo_root = core::GitIntegration::new(".")
+        .ok()
+        .and_then(|git| git.workdir())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let repo_path_str = repo_root.to_string_lossy().to_string();
+    let context_fetcher = core::ContextFetcher::new(repo_root.clone());
+
+    let mut plugin_manager = plugins::plugin::PluginManager::new();
+    plugin_manager.load_builtin_plugins(&config.plugins).await?;
     
     let diff_content = if let Some(path) = diff_path {
         tokio::fs::read_to_string(path).await?
@@ -214,13 +224,23 @@ async fn review_command(
             continue;
         }
         
-        let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
         let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
             &diff.hunks.iter()
                 .map(|h| (h.new_start, h.new_start + h.new_lines))
                 .collect::<Vec<_>>()
         ).await?;
+
+        // Run pre-analyzers to get additional context
+        let analyzer_chunks = plugin_manager.run_pre_analyzers(&diff, &repo_path_str).await?;
+        context_chunks.extend(analyzer_chunks);
+
+        // Extract symbols from diff and fetch their definitions
+        let symbols = extract_symbols_from_diff(&diff);
+        if !symbols.is_empty() {
+            let definition_chunks = context_fetcher.fetch_related_definitions(&diff.file_path, &symbols).await?;
+            context_chunks.extend(definition_chunks);
+        }
         
         // Get path-specific configuration
         let path_config = config.get_path_config(&diff.file_path);
@@ -288,8 +308,12 @@ async fn review_command(
         }
     }
     
+    let processed_comments = plugin_manager
+        .run_post_processors(all_comments, &repo_path_str)
+        .await?;
+
     let effective_format = if patch { OutputFormat::Patch } else { format };
-    output_comments(&all_comments, output_path, effective_format).await?;
+    output_comments(&processed_comments, output_path, effective_format).await?;
     
     Ok(())
 }
@@ -972,6 +996,16 @@ async fn smart_review_command(
     output_path: Option<PathBuf>,
 ) -> Result<()> {
     info!("Starting smart review analysis with model: {}", config.model);
+
+    let repo_root = core::GitIntegration::new(".")
+        .ok()
+        .and_then(|git| git.workdir())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let repo_path_str = repo_root.to_string_lossy().to_string();
+    let context_fetcher = core::ContextFetcher::new(repo_root.clone());
+
+    let mut plugin_manager = plugins::plugin::PluginManager::new();
+    plugin_manager.load_builtin_plugins(&config.plugins).await?;
     
     let diff_content = if let Some(path) = diff_path {
         tokio::fs::read_to_string(path).await?
@@ -1003,13 +1037,16 @@ async fn smart_review_command(
             continue;
         }
         
-        let context_fetcher = core::ContextFetcher::new(PathBuf::from("."));
         let mut context_chunks = context_fetcher.fetch_context_for_file(
             &diff.file_path,
             &diff.hunks.iter()
                 .map(|h| (h.new_start, h.new_start + h.new_lines))
                 .collect::<Vec<_>>()
         ).await?;
+
+        // Run pre-analyzers to get additional context
+        let analyzer_chunks = plugin_manager.run_pre_analyzers(&diff, &repo_path_str).await?;
+        context_chunks.extend(analyzer_chunks);
         
         // Get path-specific configuration
         let path_config = config.get_path_config(&diff.file_path);
@@ -1073,9 +1110,14 @@ async fn smart_review_command(
         }
     }
     
+    // Run post-processors to filter and refine comments
+    let processed_comments = plugin_manager
+        .run_post_processors(all_comments, &repo_path_str)
+        .await?;
+
     // Generate summary and output results
-    let summary = core::CommentSynthesizer::generate_summary(&all_comments);
-    let output = format_smart_review_output(&all_comments, &summary);
+    let summary = core::CommentSynthesizer::generate_summary(&processed_comments);
+    let output = format_smart_review_output(&processed_comments, &summary);
     
     if let Some(path) = output_path {
         tokio::fs::write(path, output).await?;
