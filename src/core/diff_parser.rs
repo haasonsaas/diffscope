@@ -259,9 +259,37 @@ impl DiffParser {
     }
 
     fn extract_file_path(line: &str) -> Result<String> {
+        let re = regex::Regex::new(r#"^diff --git (?:"a/(.*?)"|a/(\S+)) (?:"b/(.*?)"|b/(\S+))"#)?;
+        if let Some(caps) = re.captures(line) {
+            let a_path = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .map(|m| m.as_str())
+                .unwrap_or("");
+            let b_path = caps
+                .get(3)
+                .or_else(|| caps.get(4))
+                .map(|m| m.as_str())
+                .unwrap_or("");
+
+            let chosen = if !b_path.is_empty() && b_path != "/dev/null" {
+                b_path
+            } else {
+                a_path
+            };
+            return Ok(chosen.to_string());
+        }
+
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 4 {
-            Ok(parts[2].trim_start_matches("a/").to_string())
+            let a_path = parts[2].trim_start_matches("a/");
+            let b_path = parts[3].trim_start_matches("b/");
+            let chosen = if b_path != "/dev/null" {
+                b_path
+            } else {
+                a_path
+            };
+            Ok(chosen.to_string())
         } else {
             anyhow::bail!("Invalid diff header: {}", line)
         }
@@ -272,7 +300,15 @@ impl DiffParser {
             .strip_prefix(prefix)
             .ok_or_else(|| anyhow::anyhow!("Invalid file header: {}", line))?
             .trim();
-        let path = raw.split_whitespace().next().unwrap_or(raw);
+        let path = if let Some(stripped) = raw.strip_prefix('"') {
+            if let Some(end) = stripped.find('"') {
+                &stripped[..end]
+            } else {
+                stripped
+            }
+        } else {
+            raw.split_whitespace().next().unwrap_or(raw)
+        };
         Ok(path
             .trim_start_matches("a/")
             .trim_start_matches("b/")
@@ -295,6 +331,10 @@ impl DiffParser {
             && !lines[*i].starts_with("+++ ")
         {
             let line = lines[*i];
+            if line.starts_with("\\ No newline at end of file") {
+                *i += 1;
+                continue;
+            }
             if line.is_empty() {
                 *i += 1;
                 continue;
@@ -398,6 +438,39 @@ mod tests {
         let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].file_path, PathBuf::from("foo.txt"));
+        assert_eq!(diffs[0].hunks.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_diff_header_with_spaces() {
+        let diff_text = "\
+diff --git \"a/foo bar.txt\" \"b/foo bar.txt\"\n\
+index 83db48f..f735c20 100644\n\
+--- \"a/foo bar.txt\"\n\
++++ \"b/foo bar.txt\"\n\
+@@ -1,1 +1,1 @@\n\
+-hello\n\
++world\n";
+
+        let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].file_path, PathBuf::from("foo bar.txt"));
+    }
+
+    #[test]
+    fn test_parse_no_newline_marker() {
+        let diff_text = "\
+diff --git a/foo.txt b/foo.txt\n\
+index 83db48f..f735c20 100644\n\
+--- a/foo.txt\n\
++++ b/foo.txt\n\
+@@ -1,1 +1,1 @@\n\
+-hello\n\
+\\ No newline at end of file\n\
++world\n";
+
+        let diffs = DiffParser::parse_unified_diff(diff_text).unwrap();
+        assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].hunks.len(), 1);
     }
 }

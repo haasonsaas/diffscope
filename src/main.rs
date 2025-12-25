@@ -32,7 +32,12 @@ struct Cli {
     #[arg(long, global = true)]
     max_tokens: Option<usize>,
 
-    #[arg(long, global = true, value_parser = clap::value_parser!(bool))]
+    #[arg(
+        long,
+        global = true,
+        value_parser = clap::value_parser!(bool),
+        help = "Use OpenAI Responses API (true/false)"
+    )]
     openai_responses: Option<bool>,
 
     #[arg(long, global = true, default_value = "json")]
