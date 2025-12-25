@@ -274,6 +274,12 @@ Apache-2.0 License. See [LICENSE](LICENSE) for details.
 🚨 **Critical Issues:** 1
 📁 **Files Analyzed:** 3
 
+## 🧭 Change Walkthrough
+
+- `src/auth.py` (modified; +12, -3)
+- `src/models.py` (modified; +8, -1)
+- `src/routes.py` (new; +24, -0)
+
 ### 🎯 Priority Actions
 1. Address 1 security issue(s) immediately
 2. Consider performance optimization for database queries

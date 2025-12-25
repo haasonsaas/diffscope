@@ -257,7 +257,6 @@ async fn review_command(
 
     let diffs = core::DiffParser::parse_unified_diff(&diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
-
     let model_config = adapters::llm::ModelConfig {
         model_name: config.model.clone(),
         api_key: config.api_key.clone(),
@@ -273,7 +272,7 @@ async fn review_command(
     base_prompt_config.max_diff_chars = config.max_diff_chars;
     let mut all_comments = Vec::new();
 
-    for diff in diffs {
+    for diff in &diffs {
         // Check if file should be excluded
         if config.should_exclude(&diff.file_path) {
             info!("Skipping excluded file: {}", diff.file_path.display());
@@ -301,12 +300,12 @@ async fn review_command(
 
         // Run pre-analyzers to get additional context
         let analyzer_chunks = plugin_manager
-            .run_pre_analyzers(&diff, &repo_path_str)
+            .run_pre_analyzers(diff, &repo_path_str)
             .await?;
         context_chunks.extend(analyzer_chunks);
 
         // Extract symbols from diff and fetch their definitions
-        let symbols = extract_symbols_from_diff(&diff);
+        let symbols = extract_symbols_from_diff(diff);
         if !symbols.is_empty() {
             let definition_chunks = context_fetcher
                 .fetch_related_definitions(&diff.file_path, &symbols)
@@ -799,7 +798,7 @@ async fn review_diff_content_raw(
     let repo_path_str = repo_path.to_string_lossy().to_string();
     let context_fetcher = core::ContextFetcher::new(repo_path.to_path_buf());
 
-    for diff in diffs {
+    for diff in &diffs {
         // Check if file should be excluded
         if config.should_exclude(&diff.file_path) {
             info!("Skipping excluded file: {}", diff.file_path.display());
@@ -827,12 +826,12 @@ async fn review_diff_content_raw(
 
         // Run pre-analyzers to get additional context
         let analyzer_chunks = plugin_manager
-            .run_pre_analyzers(&diff, &repo_path_str)
+            .run_pre_analyzers(diff, &repo_path_str)
             .await?;
         context_chunks.extend(analyzer_chunks);
 
         // Extract symbols from diff and fetch their definitions
-        let symbols = extract_symbols_from_diff(&diff);
+        let symbols = extract_symbols_from_diff(diff);
         if !symbols.is_empty() {
             let definition_chunks = context_fetcher
                 .fetch_related_definitions(&diff.file_path, &symbols)
@@ -1227,6 +1226,7 @@ async fn smart_review_command(
 
     let diffs = core::DiffParser::parse_unified_diff(&diff_content)?;
     info!("Parsed {} file diffs", diffs.len());
+    let walkthrough = build_change_walkthrough(&diffs);
 
     let model_config = adapters::llm::ModelConfig {
         model_name: config.model.clone(),
@@ -1240,7 +1240,7 @@ async fn smart_review_command(
     let adapter = adapters::llm::create_adapter(&model_config)?;
     let mut all_comments = Vec::new();
 
-    for diff in diffs {
+    for diff in &diffs {
         // Check if file should be excluded
         if config.should_exclude(&diff.file_path) {
             info!("Skipping excluded file: {}", diff.file_path.display());
@@ -1268,7 +1268,7 @@ async fn smart_review_command(
 
         // Run pre-analyzers to get additional context
         let analyzer_chunks = plugin_manager
-            .run_pre_analyzers(&diff, &repo_path_str)
+            .run_pre_analyzers(diff, &repo_path_str)
             .await?;
         context_chunks.extend(analyzer_chunks);
 
@@ -1295,7 +1295,7 @@ async fn smart_review_command(
         }
 
         // Extract symbols and get definitions
-        let symbols = extract_symbols_from_diff(&diff);
+        let symbols = extract_symbols_from_diff(diff);
         if !symbols.is_empty() {
             let definition_chunks = context_fetcher
                 .fetch_related_definitions(&diff.file_path, &symbols)
@@ -1306,7 +1306,7 @@ async fn smart_review_command(
         let guidance = build_review_guidance(&config, path_config);
         let (system_prompt, user_prompt) =
             core::SmartReviewPromptBuilder::build_enhanced_review_prompt(
-                &diff,
+                diff,
                 &context_chunks,
                 config.max_context_chars,
                 config.max_diff_chars,
@@ -1344,7 +1344,7 @@ async fn smart_review_command(
                 }
             }
 
-            let comments = filter_comments_for_diff(&diff, comments);
+            let comments = filter_comments_for_diff(diff, comments);
             all_comments.extend(comments);
         }
     }
@@ -1357,7 +1357,7 @@ async fn smart_review_command(
 
     // Generate summary and output results
     let summary = core::CommentSynthesizer::generate_summary(&processed_comments);
-    let output = format_smart_review_output(&processed_comments, &summary);
+    let output = format_smart_review_output(&processed_comments, &summary, &walkthrough);
 
     if let Some(path) = output_path {
         tokio::fs::write(path, output).await?;
@@ -1552,6 +1552,7 @@ fn parse_smart_tags(value: &str) -> Vec<String> {
 fn format_smart_review_output(
     comments: &[core::Comment],
     summary: &core::comment::ReviewSummary,
+    walkthrough: &str,
 ) -> String {
     let mut output = String::new();
 
@@ -1582,6 +1583,11 @@ fn format_smart_review_output(
         "📁 **Files Analyzed:** {}\n\n",
         summary.files_reviewed
     ));
+
+    if !walkthrough.trim().is_empty() {
+        output.push_str(walkthrough);
+        output.push('\n');
+    }
 
     // Quick Stats
     output.push_str("### 📈 Issue Breakdown\n\n");
@@ -1884,6 +1890,65 @@ fn build_review_guidance(
             sections.join("\n\n")
         ))
     }
+}
+
+fn build_change_walkthrough(diffs: &[core::UnifiedDiff]) -> String {
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    let max_entries = 50usize;
+
+    for diff in diffs {
+        if diff.is_binary {
+            continue;
+        }
+
+        let mut added = 0usize;
+        let mut removed = 0usize;
+        for hunk in &diff.hunks {
+            for change in &hunk.changes {
+                match change.change_type {
+                    core::diff_parser::ChangeType::Added => added += 1,
+                    core::diff_parser::ChangeType::Removed => removed += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let status = if diff.is_deleted {
+            "deleted"
+        } else if diff.is_new {
+            "new"
+        } else {
+            "modified"
+        };
+
+        entries.push(format!(
+            "- `{}` ({}; +{}, -{})",
+            diff.file_path.display(),
+            status,
+            added,
+            removed
+        ));
+
+        if entries.len() >= max_entries {
+            truncated = true;
+            break;
+        }
+    }
+
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    let mut output = String::new();
+    output.push_str("## 🧭 Change Walkthrough\n\n");
+    output.push_str(&entries.join("\n"));
+    output.push('\n');
+    if truncated {
+        output.push_str("\n...truncated (too many files)\n");
+    }
+
+    output
 }
 
 fn apply_confidence_threshold(
