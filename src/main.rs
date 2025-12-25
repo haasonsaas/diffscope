@@ -31,6 +31,9 @@ struct Cli {
     #[arg(long, global = true)]
     max_tokens: Option<usize>,
 
+    #[arg(long, global = true, value_parser = clap::value_parser!(bool))]
+    openai_responses: Option<bool>,
+
     #[arg(long, global = true, default_value = "json")]
     output_format: OutputFormat,
 
@@ -115,8 +118,8 @@ enum GitCommands {
     Uncommitted,
     Staged,
     Branch {
-        #[arg(default_value = "main")]
-        base: String,
+        #[arg(help = "Base branch/ref (defaults to repo default)")]
+        base: Option<String>,
     },
     Suggest,
     PrTitle,
@@ -151,6 +154,9 @@ async fn main() -> Result<()> {
     }
     if let Some(tokens) = cli.max_tokens {
         config.max_tokens = tokens;
+    }
+    if let Some(flag) = cli.openai_responses {
+        config.openai_use_responses = Some(flag);
     }
     config.normalize();
 
@@ -397,8 +403,12 @@ async fn git_command(
             git.get_staged_diff()?
         }
         GitCommands::Branch { base } => {
-            info!("Analyzing changes from branch: {}", base);
-            git.get_branch_diff(&base)?
+            let base_branch = base.unwrap_or_else(|| {
+                git.get_default_branch()
+                    .unwrap_or_else(|_| "main".to_string())
+            });
+            info!("Analyzing changes from branch: {}", base_branch);
+            git.get_branch_diff(&base_branch)?
         }
         GitCommands::Suggest => {
             return suggest_commit_message(config).await;

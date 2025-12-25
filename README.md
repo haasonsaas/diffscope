@@ -123,6 +123,9 @@ git diff | diffscope smart-review --model claude-3-5-sonnet-20241022
 export OPENAI_API_KEY=your-key
 git diff | diffscope review --model gpt-4o
 
+# Force OpenAI Responses API usage
+git diff | diffscope review --openai-responses true
+
 # Anthropic Claude
 export ANTHROPIC_API_KEY=your-key  
 git diff | diffscope review --model claude-3-5-sonnet-20241022
@@ -482,12 +485,15 @@ diffscope smart-review [--diff file.patch]
 # Git integration
 diffscope git uncommitted    # Review uncommitted changes
 diffscope git staged         # Review staged changes
-diffscope git branch [base]  # Compare against branch (default: main)
+diffscope git branch [base]  # Compare against branch (default: repo default)
 diffscope git suggest        # Generate commit messages
 diffscope git pr-title       # Generate PR titles
 
 # Pull request operations
 diffscope pr [--number N] [--post-comments] [--summary]
+
+# Repository check (uncommitted changes at path)
+diffscope check [path]
 
 # File comparison
 diffscope compare --old-file old.py --new-file new.py
