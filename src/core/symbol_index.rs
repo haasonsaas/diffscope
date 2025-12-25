@@ -421,12 +421,12 @@ struct LspClient {
 
 impl LspClient {
     fn spawn(command: &str, root: &Path) -> Result<Self> {
-        let mut parts = command.split_whitespace();
-        let program = parts
-            .next()
+        let parts = shell_words::split(command).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        let (program, args) = parts
+            .split_first()
             .ok_or_else(|| anyhow::anyhow!("Empty LSP command"))?;
         let mut cmd = Command::new(program);
-        cmd.args(parts);
+        cmd.args(args);
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

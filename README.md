@@ -266,7 +266,7 @@ symbol_index_lsp_languages:
 
 # Kotlin (Kotlin LSP)
 # symbol_index_provider: lsp
-# symbol_index_lsp_command: "kotlin-lsp.sh --stdio"
+# symbol_index_lsp_command: kotlin-lsp
 # symbol_index_lsp_languages:
 #   kt: kotlin
 
@@ -297,6 +297,21 @@ symbol_index_lsp_languages:
 # symbol_index_lsp_languages:
 #   php: php
 ```
+
+### LSP Setup Notes (Install + Command)
+
+Use your package manager if you already have one. These are the minimal install commands and the server command to set in `symbol_index_lsp_command`.
+
+- rust-analyzer: `rustup component add rust-analyzer` and (recommended) `rustup component add rust-src`; command: `rust-analyzer`.
+- TypeScript/JavaScript (typescript-language-server): `npm install -g typescript-language-server typescript`; command: `typescript-language-server --stdio`.
+- Python (python-lsp-server/pylsp): `pip install "python-lsp-server[all]"` (or `python-lsp-server`); command: `pylsp`.
+- Go (gopls): `go install golang.org/x/tools/gopls@latest`; command: `gopls`.
+- Java (Eclipse JDT LS): use the distribution’s wrapper `bin/jdtls` with `-configuration` and `-data` arguments.
+- Kotlin (Kotlin LSP): `brew install JetBrains/utils/kotlin-lsp` or use the standalone zip; command: `kotlin-lsp` (or `kotlin-lsp.sh`, see its `--help` for stdio options).
+- C/C++ (clangd): install via your package manager (e.g., `brew install llvm` or `apt-get install clangd-12`); command: `clangd`.
+- C# (csharp-ls): `dotnet tool install --global csharp-ls`; command: `csharp-ls`.
+- Ruby (solargraph): `gem install solargraph`; command: `solargraph stdio`.
+- PHP (Phpactor): install Phpactor (e.g., download the PHAR or install via composer); command: `phpactor language-server`.
 
 ## Plugin Development
 
