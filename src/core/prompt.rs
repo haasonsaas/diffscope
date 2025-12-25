@@ -8,6 +8,7 @@ pub struct PromptConfig {
     pub user_prompt_template: String,
     pub max_tokens: usize,
     pub include_context: bool,
+    pub max_context_chars: usize,
 }
 
 impl Default for PromptConfig {
@@ -50,6 +51,7 @@ Line 28: Performance - O(n²) algorithm for large dataset. Will be slow with man
 </instructions>"#.to_string(),
             max_tokens: 2000,
             include_context: true,
+            max_context_chars: 20000,
         }
     }
 }
@@ -108,7 +110,7 @@ impl PromptBuilder {
         let mut output = String::new();
 
         for chunk in chunks {
-            output.push_str(&format!(
+            let block = format!(
                 "\n[{:?} - {}{}]\n{}\n",
                 chunk.context_type,
                 chunk.file_path.display(),
@@ -117,7 +119,14 @@ impl PromptBuilder {
                     .map(|(s, e)| format!(":{}-{}", s, e))
                     .unwrap_or_default(),
                 chunk.content
-            ));
+            );
+            if self.config.max_context_chars > 0
+                && output.len().saturating_add(block.len()) > self.config.max_context_chars
+            {
+                output.push_str("\n[Context truncated]\n");
+                break;
+            }
+            output.push_str(&block);
         }
 
         Ok(output)

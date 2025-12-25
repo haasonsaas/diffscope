@@ -41,19 +41,38 @@ jobs:
             const fs = require('fs');
             const comments = JSON.parse(fs.readFileSync('comments.json', 'utf8'));
             const headSha = context.payload.pull_request.head.sha;
+            const fallback = [];
             
             for (const comment of comments) {
               if (!comment.file_path || !comment.line_number || comment.line_number < 1) {
                 continue;
               }
-              await github.rest.pulls.createReviewComment({
+              try {
+                await github.rest.pulls.createReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  body: `**${comment.severity}**: ${comment.content}`,
+                  commit_id: headSha,
+                  path: comment.file_path,
+                  line: comment.line_number,
+                  side: "RIGHT"
+                });
+              } catch (error) {
+                fallback.push(`- **${comment.severity}** ${comment.file_path}:${comment.line_number} ${comment.content}`);
+              }
+            }
+
+            if (fallback.length > 0) {
+              const body = [
+                "Some review comments could not be placed inline and are listed below:",
+                "",
+                ...fallback.slice(0, 100)
+              ].join("\\n");
+              await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number,
-                body: `**${comment.severity}**: ${comment.content}`,
-                commit_id: headSha,
-                path: comment.file_path,
-                line: comment.line_number,
-                side: "RIGHT"
+                issue_number: context.issue.number,
+                body
               });
             }

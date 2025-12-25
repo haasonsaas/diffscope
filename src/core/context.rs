@@ -53,7 +53,10 @@ impl ContextFetcher {
                 let end_idx = end.min(file_lines.len());
 
                 if start_idx < file_lines.len() {
-                    let chunk_content = file_lines[start_idx..end_idx].join("\n");
+                    let chunk_content = truncate_with_notice(
+                        file_lines[start_idx..end_idx].join("\n"),
+                        MAX_CONTEXT_CHARS,
+                    );
                     chunks.push(LLMContextChunk {
                         file_path: file_path.clone(),
                         content: chunk_content,
@@ -106,6 +109,7 @@ impl ContextFetcher {
                 .take(max_lines)
                 .collect::<Vec<_>>()
                 .join("\n");
+            let snippet = truncate_with_notice(snippet, MAX_CONTEXT_CHARS);
             if snippet.trim().is_empty() {
                 continue;
             }
@@ -153,7 +157,10 @@ impl ContextFetcher {
                             // Extract a few lines around the definition for context
                             let start_line = line_num.saturating_sub(2);
                             let end_line = (line_num + 5).min(lines.len());
-                            let definition_content = lines[start_line..end_line].join("\n");
+                            let definition_content = truncate_with_notice(
+                                lines[start_line..end_line].join("\n"),
+                                MAX_CONTEXT_CHARS,
+                            );
 
                             chunks.push(LLMContextChunk {
                                 file_path: file_path.clone(),
@@ -192,6 +199,17 @@ fn merge_ranges(lines: &[(usize, usize)]) -> Vec<(usize, usize)> {
     }
 
     merged
+}
+
+const MAX_CONTEXT_CHARS: usize = 8000;
+
+fn truncate_with_notice(mut content: String, max_chars: usize) -> String {
+    if max_chars == 0 || content.len() <= max_chars {
+        return content;
+    }
+    content.truncate(max_chars.saturating_sub(20));
+    content.push_str("\n[Truncated]\n");
+    content
 }
 
 async fn read_file_lossy(path: &Path) -> Result<String> {

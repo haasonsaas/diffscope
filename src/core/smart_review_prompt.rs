@@ -74,6 +74,8 @@ TAGS: [comma-separated relevant tags]
         context_chunks: &[LLMContextChunk],
     ) -> Result<String> {
         let mut prompt = String::new();
+        let mut context_chars = 0usize;
+        const MAX_CONTEXT_CHARS: usize = 20000;
 
         prompt.push_str(&format!(
             "Please review the following code changes in file: {}\n\n",
@@ -90,7 +92,7 @@ TAGS: [comma-separated relevant tags]
                     chunk.file_path.display(),
                     format!("{:?}", chunk.context_type)
                 );
-                prompt.push_str(&format!(
+                let block = format!(
                     "**{}** (lines {}-{}):\n```\n{}\n```\n\n",
                     description,
                     start_line,
@@ -101,7 +103,13 @@ TAGS: [comma-separated relevant tags]
                         .take(20)
                         .collect::<Vec<_>>()
                         .join("\n")
-                ));
+                );
+                if context_chars.saturating_add(block.len()) > MAX_CONTEXT_CHARS {
+                    prompt.push_str("[Context truncated]\n\n");
+                    break;
+                }
+                prompt.push_str(&block);
+                context_chars = context_chars.saturating_add(block.len());
             }
         }
 
