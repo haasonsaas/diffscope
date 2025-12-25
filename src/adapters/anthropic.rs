@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tokio::time::sleep;
 use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 
 pub struct AnthropicAdapter {
@@ -66,6 +68,42 @@ impl AnthropicAdapter {
             base_url,
         })
     }
+
+    async fn send_with_retry<F>(&self, mut make_request: F) -> Result<reqwest::Response>
+    where
+        F: FnMut() -> reqwest::RequestBuilder,
+    {
+        const MAX_RETRIES: usize = 2;
+        const BASE_DELAY_MS: u64 = 250;
+
+        for attempt in 0..=MAX_RETRIES {
+            match make_request().send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(response);
+                    }
+
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    if is_retryable_status(status) && attempt < MAX_RETRIES {
+                        sleep(Duration::from_millis(BASE_DELAY_MS * (attempt as u64 + 1))).await;
+                        continue;
+                    }
+
+                    anyhow::bail!("Anthropic API error ({}): {}", status, body);
+                }
+                Err(err) => {
+                    if attempt < MAX_RETRIES {
+                        sleep(Duration::from_millis(BASE_DELAY_MS * (attempt as u64 + 1))).await;
+                        continue;
+                    }
+                    return Err(err.into());
+                }
+            }
+        }
+
+        anyhow::bail!("Anthropic request failed after retries");
+    }
 }
 
 #[async_trait]
@@ -86,21 +124,18 @@ impl LLMAdapter for AnthropicAdapter {
             system: request.system_prompt,
         };
         
-        let response = self.client
-            .post(format!("{}/messages", self.base_url))
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "messages-2023-12-15")
-            .header("Content-Type", "application/json")
-            .json(&anthropic_request)
-            .send()
-            .await
-            .context("Failed to send request to Anthropic")?;
-        
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            anyhow::bail!("Anthropic API error: {}", error_text);
-        }
+        let url = format!("{}/messages", self.base_url);
+        let response = self.send_with_retry(|| {
+            self.client
+                .post(&url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "messages-2023-12-15")
+                .header("Content-Type", "application/json")
+                .json(&anthropic_request)
+        })
+        .await
+        .context("Failed to send request to Anthropic")?;
         
         let anthropic_response: AnthropicResponse = response.json().await
             .context("Failed to parse Anthropic response")?;
@@ -131,4 +166,8 @@ impl LLMAdapter for AnthropicAdapter {
     fn _model_name(&self) -> &str {
         &self.config.model_name
     }
+}
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }

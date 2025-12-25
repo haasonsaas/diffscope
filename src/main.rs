@@ -146,6 +146,7 @@ async fn main() -> Result<()> {
     if let Some(tokens) = cli.max_tokens {
         config.max_tokens = tokens;
     }
+    config.normalize();
     
     match cli.command {
         Commands::Review { diff, patch, output } => {

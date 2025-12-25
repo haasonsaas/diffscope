@@ -125,6 +125,20 @@ impl Config {
             self.system_prompt = Some(prompt);
         }
     }
+
+    pub fn normalize(&mut self) {
+        if self.model.trim().is_empty() {
+            self.model = default_model();
+        }
+
+        if !self.temperature.is_finite() || self.temperature < 0.0 || self.temperature > 2.0 {
+            self.temperature = default_temperature();
+        }
+
+        if self.max_tokens == 0 {
+            self.max_tokens = default_max_tokens();
+        }
+    }
     
     pub fn get_path_config(&self, file_path: &PathBuf) -> Option<&PathConfig> {
         let file_path_str = file_path.to_string_lossy();
@@ -178,6 +192,25 @@ impl Config {
             // Direct path prefix matching
             path.starts_with(pattern)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_clamps_values() {
+        let mut config = Config::default();
+        config.model = "   ".to_string();
+        config.temperature = 5.0;
+        config.max_tokens = 0;
+
+        config.normalize();
+
+        assert_eq!(config.model, default_model());
+        assert_eq!(config.temperature, default_temperature());
+        assert_eq!(config.max_tokens, default_max_tokens());
     }
 }
 

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tokio::time::sleep;
 use crate::adapters::llm::{LLMAdapter, LLMRequest, LLMResponse, ModelConfig, Usage};
 
 pub struct OllamaAdapter {
@@ -46,6 +48,42 @@ impl OllamaAdapter {
             base_url,
         })
     }
+
+    async fn send_with_retry<F>(&self, mut make_request: F) -> Result<reqwest::Response>
+    where
+        F: FnMut() -> reqwest::RequestBuilder,
+    {
+        const MAX_RETRIES: usize = 2;
+        const BASE_DELAY_MS: u64 = 250;
+
+        for attempt in 0..=MAX_RETRIES {
+            match make_request().send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(response);
+                    }
+
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    if is_retryable_status(status) && attempt < MAX_RETRIES {
+                        sleep(Duration::from_millis(BASE_DELAY_MS * (attempt as u64 + 1))).await;
+                        continue;
+                    }
+
+                    anyhow::bail!("Ollama API error ({}): {}", status, body);
+                }
+                Err(err) => {
+                    if attempt < MAX_RETRIES {
+                        sleep(Duration::from_millis(BASE_DELAY_MS * (attempt as u64 + 1))).await;
+                        continue;
+                    }
+                    return Err(err.into());
+                }
+            }
+        }
+
+        anyhow::bail!("Ollama request failed after retries");
+    }
 }
 
 #[async_trait]
@@ -64,17 +102,14 @@ impl LLMAdapter for OllamaAdapter {
             stream: false,
         };
         
-        let response = self.client
-            .post(format!("{}/api/generate", self.base_url))
-            .json(&ollama_request)
-            .send()
-            .await
-            .context("Failed to send request to Ollama")?;
-        
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            anyhow::bail!("Ollama API error: {}", error_text);
-        }
+        let url = format!("{}/api/generate", self.base_url);
+        let response = self.send_with_retry(|| {
+            self.client
+                .post(&url)
+                .json(&ollama_request)
+        })
+        .await
+        .context("Failed to send request to Ollama")?;
         
         let ollama_response: OllamaResponse = response.json().await
             .context("Failed to parse Ollama response")?;
@@ -97,4 +132,8 @@ impl LLMAdapter for OllamaAdapter {
     fn _model_name(&self) -> &str {
         &self.config.model_name
     }
+}
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
