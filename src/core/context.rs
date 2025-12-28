@@ -89,11 +89,9 @@ impl ContextFetcher {
             };
 
             if let Ok(entries) = glob(&pattern_path) {
-                for entry in entries {
-                    if let Ok(path) = entry {
-                        if path.is_file() {
-                            matched_paths.insert(path);
-                        }
+                for path in entries.flatten() {
+                    if path.is_file() {
+                        matched_paths.insert(path);
                     }
                 }
             }

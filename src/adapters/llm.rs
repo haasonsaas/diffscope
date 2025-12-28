@@ -78,7 +78,7 @@ pub fn create_adapter(config: &ModelConfig) -> Result<Box<dyn LLMAdapter>> {
             if config
                 .base_url
                 .as_ref()
-                .map_or(false, |u| u.contains("11434")) =>
+                .is_some_and(|u| u.contains("11434")) =>
         {
             Ok(Box::new(crate::adapters::OllamaAdapter::new(
                 config.clone(),

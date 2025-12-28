@@ -278,7 +278,7 @@ impl SymbolIndex {
                         if files_seen >= max_files {
                             break;
                         }
-                        if let Some(full_path) = repo_root.join(relative).canonicalize().ok() {
+                        if let Ok(full_path) = repo_root.join(relative).canonicalize() {
                             if let Ok(metadata) = fs::metadata(&full_path) {
                                 if metadata.len() as usize > max_bytes {
                                     continue;
@@ -446,14 +446,8 @@ fn choose_lsp_command(
         let score: usize = option
             .extensions
             .iter()
-            .filter(|ext| {
-                let ext: &str = *ext;
-                enabled_extensions.is_empty() || enabled_extensions.contains::<str>(ext)
-            })
-            .filter_map(|ext| {
-                let ext: &str = *ext;
-                extension_counts.get::<str>(ext)
-            })
+            .filter(|ext| enabled_extensions.is_empty() || enabled_extensions.contains::<str>(ext))
+            .filter_map(|ext| extension_counts.get::<str>(ext))
             .sum();
 
         if score > best_score {
@@ -640,7 +634,7 @@ fn patterns_for_extension(ext: &str) -> Option<&'static Vec<Regex>> {
 
 fn add_symbols_from_lines(
     index: &mut SymbolIndex,
-    relative: &PathBuf,
+    relative: &Path,
     lines: &[&str],
     patterns: &Vec<Regex>,
     max_locations: usize,
@@ -663,7 +657,7 @@ fn add_symbols_from_lines(
                     let end = (idx + 3).min(lines.len().saturating_sub(1));
                     let snippet = lines[start..=end].join("\n");
                     entry.push(SymbolLocation {
-                        file_path: relative.clone(),
+                        file_path: relative.to_path_buf(),
                         line_range: (start + 1, end + 1),
                         snippet,
                     });
@@ -732,7 +726,7 @@ impl LspClient {
     fn index_file(
         &mut self,
         index: &mut SymbolIndex,
-        relative: &PathBuf,
+        relative: &Path,
         full_path: &Path,
         content: &str,
         language_id: &str,
@@ -783,7 +777,7 @@ impl LspClient {
             };
 
             entry.push(SymbolLocation {
-                file_path: relative.clone(),
+                file_path: relative.to_path_buf(),
                 line_range: (start, end),
                 snippet,
             });
@@ -927,11 +921,7 @@ fn extract_range(value: Option<&Value>) -> Option<(usize, usize)> {
 fn path_to_uri(path: &Path) -> Result<String> {
     let absolute = path.canonicalize()?;
     let path_str = absolute.to_string_lossy().replace('\\', "/");
-    let encoded = path_str
-        .split('/')
-        .map(|segment| url_encode(segment))
-        .collect::<Vec<_>>()
-        .join("/");
+    let encoded = path_str.split('/').map(url_encode).collect::<Vec<_>>().join("/");
     Ok(format!("file://{}", encoded))
 }
 

@@ -173,8 +173,6 @@ impl ChangelogGenerator {
                 ChangeType::Fix
             } else if first_line.to_lowercase().contains("add") {
                 ChangeType::Feature
-            } else if first_line.to_lowercase().contains("update") {
-                ChangeType::Chore
             } else {
                 ChangeType::Chore
             };
@@ -231,7 +229,7 @@ impl ChangelogGenerator {
             for entry in &breaking_changes {
                 output.push_str(&format!("* {}\n", entry.message));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Then by category
@@ -270,7 +268,7 @@ impl ChangelogGenerator {
                             ));
                         }
                     }
-                    output.push_str("\n");
+                    output.push('\n');
                 }
             }
         }
@@ -306,7 +304,7 @@ impl ChangelogGenerator {
         if breaking > 0 {
             output.push_str(&format!("- ⚠️  **Breaking Changes**: {}\n", breaking));
         }
-        output.push_str("\n");
+        output.push('\n');
 
         // Highlights (features and breaking changes)
         let feature_entries: Vec<_> = entries
@@ -319,7 +317,7 @@ impl ChangelogGenerator {
             for entry in feature_entries.iter().take(5) {
                 output.push_str(&format!("- {}\n", entry.message));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Breaking changes
@@ -330,7 +328,7 @@ impl ChangelogGenerator {
             for entry in &breaking_entries {
                 output.push_str(&format!("- {}\n", entry.message));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Bug fixes
@@ -344,7 +342,7 @@ impl ChangelogGenerator {
             for entry in fix_entries.iter().take(10) {
                 output.push_str(&format!("- {}\n", entry.message));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Contributors

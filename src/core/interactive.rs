@@ -58,7 +58,7 @@ impl InteractiveCommand {
 
     pub async fn execute(
         &self,
-        adapter: &Box<dyn LLMAdapter>,
+        adapter: &dyn LLMAdapter,
         diff_content: Option<&str>,
     ) -> Result<String> {
         match &self.command {
@@ -73,7 +73,7 @@ impl InteractiveCommand {
 
     async fn execute_review(
         &self,
-        adapter: &Box<dyn LLMAdapter>,
+        adapter: &dyn LLMAdapter,
         diff_content: Option<&str>,
     ) -> Result<String> {
         if let Some(diff) = diff_content {
@@ -116,7 +116,7 @@ impl InteractiveCommand {
 
     async fn execute_explain(
         &self,
-        adapter: &Box<dyn LLMAdapter>,
+        adapter: &dyn LLMAdapter,
         diff_content: Option<&str>,
     ) -> Result<String> {
         let context = if self.args.is_empty() {
@@ -143,7 +143,7 @@ impl InteractiveCommand {
         Ok(format!("## 💡 Explanation\n\n{}", response.content))
     }
 
-    async fn execute_generate(&self, adapter: &Box<dyn LLMAdapter>) -> Result<String> {
+    async fn execute_generate(&self, adapter: &dyn LLMAdapter) -> Result<String> {
         if self.args.is_empty() {
             return Ok(
                 "Please specify what to generate (e.g., @diffscope generate tests)".to_string(),

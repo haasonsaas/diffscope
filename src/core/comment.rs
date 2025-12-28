@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
@@ -130,7 +130,7 @@ impl CommentSynthesizer {
         let confidence = raw
             .confidence
             .unwrap_or_else(|| Self::calculate_confidence(&raw.content, &severity, &category));
-        let confidence = confidence.max(0.0).min(1.0);
+        let confidence = confidence.clamp(0.0, 1.0);
         let tags = if raw.tags.is_empty() {
             Self::extract_tags(&raw.content, &category)
         } else {
@@ -158,7 +158,7 @@ impl CommentSynthesizer {
         }))
     }
 
-    fn generate_comment_id(file_path: &PathBuf, content: &str, category: &Category) -> String {
+    fn generate_comment_id(file_path: &Path, content: &str, category: &Category) -> String {
         compute_comment_id(file_path, content, category)
     }
 
@@ -233,7 +233,7 @@ impl CommentSynthesizer {
         }
 
         // Ensure confidence stays in bounds
-        confidence.min(1.0).max(0.1)
+        confidence.clamp(0.1, 1.0)
     }
 
     fn extract_tags(content: &str, category: &Category) -> Vec<String> {
@@ -345,7 +345,7 @@ impl CommentSynthesizer {
             score -= penalty;
         }
 
-        score.max(0.0).min(10.0)
+        score.clamp(0.0, 10.0)
     }
 
     fn generate_recommendations(comments: &[Comment]) -> Vec<String> {
@@ -395,7 +395,7 @@ impl CommentSynthesizer {
         });
     }
 
-    fn sort_by_priority(comments: &mut Vec<Comment>) {
+    fn sort_by_priority(comments: &mut [Comment]) {
         comments.sort_by_key(|c| {
             let severity_priority = match c.severity {
                 Severity::Error => 0,
@@ -424,7 +424,7 @@ impl CommentSynthesizer {
     }
 }
 
-pub fn compute_comment_id(file_path: &PathBuf, content: &str, category: &Category) -> String {
+pub fn compute_comment_id(file_path: &Path, content: &str, category: &Category) -> String {
     let normalized = normalize_content(content);
     let key = format!("{}|{:?}|{}", file_path.display(), category, normalized);
     let hash = fnv1a64(key.as_bytes());

@@ -316,9 +316,11 @@ async fn review_command(
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let mut base_prompt_config = core::prompt::PromptConfig::default();
-    base_prompt_config.max_context_chars = config.max_context_chars;
-    base_prompt_config.max_diff_chars = config.max_diff_chars;
+    let base_prompt_config = core::prompt::PromptConfig {
+        max_context_chars: config.max_context_chars,
+        max_diff_chars: config.max_diff_chars,
+        ..Default::default()
+    };
     let mut all_comments = Vec::new();
 
     for diff in &diffs {
@@ -412,7 +414,7 @@ async fn review_command(
 
         let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
         let (system_prompt, user_prompt) =
-            local_prompt_builder.build_prompt(&diff, &context_chunks)?;
+            local_prompt_builder.build_prompt(diff, &context_chunks)?;
 
         let request = adapters::llm::LLMRequest {
             system_prompt,
@@ -445,7 +447,7 @@ async fn review_command(
                 }
             }
 
-            let comments = filter_comments_for_diff(&diff, comments);
+            let comments = filter_comments_for_diff(diff, comments);
             all_comments.extend(comments);
         }
     }
@@ -736,7 +738,10 @@ async fn pr_command(
             include_diagram: config.smart_review_diagram,
         };
         let pr_summary = core::PRSummaryGenerator::generate_summary_with_options(
-            &diffs, &git, &adapter, options,
+            &diffs,
+            &git,
+            adapter.as_ref(),
+            options,
         )
         .await?;
 
@@ -750,11 +755,7 @@ async fn pr_command(
         info!("Posting {} comments to PR", comments.len());
 
         for comment in &comments {
-            let body = format!(
-                "**{}**: {}",
-                format!("{:?}", comment.severity),
-                comment.content
-            );
+            let body = format!("**{:?}**: {}", comment.severity, comment.content);
 
             let mut comment_args = vec![
                 "pr".to_string(),
@@ -986,9 +987,11 @@ async fn review_diff_content_raw(
     };
 
     let adapter = adapters::llm::create_adapter(&model_config)?;
-    let mut base_prompt_config = core::prompt::PromptConfig::default();
-    base_prompt_config.max_context_chars = config.max_context_chars;
-    base_prompt_config.max_diff_chars = config.max_diff_chars;
+    let base_prompt_config = core::prompt::PromptConfig {
+        max_context_chars: config.max_context_chars,
+        max_diff_chars: config.max_diff_chars,
+        ..Default::default()
+    };
     let mut all_comments = Vec::new();
 
     let repo_path_str = repo_path.to_string_lossy().to_string();
@@ -1084,7 +1087,7 @@ async fn review_diff_content_raw(
         }
         let local_prompt_builder = core::PromptBuilder::new(local_prompt_config);
         let (system_prompt, user_prompt) =
-            local_prompt_builder.build_prompt(&diff, &context_chunks)?;
+            local_prompt_builder.build_prompt(diff, &context_chunks)?;
 
         let request = adapters::llm::LLMRequest {
             system_prompt,
@@ -1117,7 +1120,7 @@ async fn review_diff_content_raw(
                 }
             }
 
-            let comments = filter_comments_for_diff(&diff, comments);
+            let comments = filter_comments_for_diff(diff, comments);
             all_comments.extend(comments);
         }
     }
@@ -1131,10 +1134,7 @@ async fn review_diff_content_raw(
     Ok(processed_comments)
 }
 
-fn parse_llm_response(
-    content: &str,
-    file_path: &PathBuf,
-) -> Result<Vec<core::comment::RawComment>> {
+fn parse_llm_response(content: &str, file_path: &Path) -> Result<Vec<core::comment::RawComment>> {
     let mut comments = Vec::new();
     static LINE_PATTERN: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"(?i)line\s+(\d+):\s*(.+)").unwrap());
@@ -1182,7 +1182,7 @@ fn parse_llm_response(
             };
 
             comments.push(core::comment::RawComment {
-                file_path: file_path.clone(),
+                file_path: file_path.to_path_buf(),
                 line_number,
                 content,
                 suggestion,
@@ -1242,7 +1242,7 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
     let summary = core::CommentSynthesizer::generate_summary(comments);
 
     output.push_str("# Code Review Results\n\n");
-    output.push_str(&format!("## Summary\n\n"));
+    output.push_str("## Summary\n\n");
     output.push_str(&format!(
         "📊 **Overall Score:** {:.1}/10\n",
         summary.overall_score
@@ -1277,7 +1277,7 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
         };
         output.push_str(&format!("{} **{}:** {}\n", emoji, severity, count));
     }
-    output.push_str("\n");
+    output.push('\n');
 
     // Category breakdown
     output.push_str("### Issues by Category\n\n");
@@ -1310,7 +1310,7 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
         };
         output.push_str(&format!("{} **{}:** {}\n", emoji, category, count));
     }
-    output.push_str("\n");
+    output.push('\n');
 
     // Recommendations
     if !summary.recommendations.is_empty() {
@@ -1318,7 +1318,7 @@ fn format_as_markdown(comments: &[core::Comment]) -> String {
         for rec in &summary.recommendations {
             output.push_str(&format!("- {}\n", rec));
         }
-        output.push_str("\n");
+        output.push('\n');
     }
 
     output.push_str("---\n\n## Detailed Issues\n\n");
@@ -1454,7 +1454,10 @@ async fn smart_review_command(
                     include_diagram: false,
                 };
                 match core::PRSummaryGenerator::generate_summary_with_options(
-                    &diffs, &git, &adapter, options,
+                    &diffs,
+                    &git,
+                    adapter.as_ref(),
+                    options,
                 )
                 .await
                 {
@@ -1475,7 +1478,7 @@ async fn smart_review_command(
     };
 
     if config.smart_review_diagram {
-        match core::PRSummaryGenerator::generate_change_diagram(&diffs, &adapter).await {
+        match core::PRSummaryGenerator::generate_change_diagram(&diffs, adapter.as_ref()).await {
             Ok(Some(diagram)) => {
                 if let Some(summary) = &mut pr_summary {
                     summary.visual_diff = Some(diagram);
@@ -1636,7 +1639,7 @@ async fn smart_review_command(
 
 fn parse_smart_review_response(
     content: &str,
-    file_path: &PathBuf,
+    file_path: &Path,
 ) -> Result<Vec<core::comment::RawComment>> {
     let mut comments = Vec::new();
     let mut current_comment: Option<core::comment::RawComment> = None;
@@ -1654,7 +1657,7 @@ fn parse_smart_review_response(
             // Start new comment
             let title = title.trim();
             current_comment = Some(core::comment::RawComment {
-                file_path: file_path.clone(),
+                file_path: file_path.to_path_buf(),
                 line_number: 1,
                 content: title.to_string(),
                 suggestion: None,
@@ -1791,7 +1794,7 @@ fn parse_smart_category(value: &str) -> Option<core::comment::Category> {
 fn parse_smart_confidence(value: &str) -> Option<f32> {
     let trimmed = value.trim().trim_end_matches('%');
     if let Ok(percent) = trimmed.parse::<f32>() {
-        Some((percent / 100.0).max(0.0).min(1.0))
+        Some((percent / 100.0).clamp(0.0, 1.0))
     } else {
         None
     }
@@ -1872,7 +1875,7 @@ fn format_smart_review_output(
         let sev_count = summary.by_severity.get(severity).unwrap_or(&0);
         output.push_str(&format!("| {} | {} |\n", severity, sev_count));
     }
-    output.push_str("\n");
+    output.push('\n');
 
     output.push_str("#### By Category\n\n");
     output.push_str("| Category | Count |\n");
@@ -1892,7 +1895,7 @@ fn format_smart_review_output(
         let cat_count = summary.by_category.get(category).unwrap_or(&0);
         output.push_str(&format!("| {} | {} |\n", category, cat_count));
     }
-    output.push_str("\n");
+    output.push('\n');
 
     // Actionable Recommendations
     if !summary.recommendations.is_empty() {
@@ -1900,7 +1903,7 @@ fn format_smart_review_output(
         for (i, rec) in summary.recommendations.iter().enumerate() {
             output.push_str(&format!("{}. {}\n", i + 1, rec));
         }
-        output.push_str("\n");
+        output.push('\n');
     }
 
     if comments.is_empty() {

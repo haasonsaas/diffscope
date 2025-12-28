@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -76,7 +76,7 @@ pub struct Config {
     pub paths: HashMap<String, PathConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PathConfig {
     #[serde(default)]
     pub focus: Vec<String>,
@@ -105,19 +105,6 @@ pub struct PluginConfig {
 
     #[serde(default = "default_true")]
     pub duplicate_filter: bool,
-}
-
-impl Default for PathConfig {
-    fn default() -> Self {
-        Self {
-            focus: Vec::new(),
-            ignore_patterns: Vec::new(),
-            extra_context: Vec::new(),
-            system_prompt: None,
-            review_instructions: None,
-            severity_overrides: HashMap::new(),
-        }
-    }
 }
 
 impl Default for Config {
@@ -257,7 +244,7 @@ impl Config {
         }
     }
 
-    pub fn get_path_config(&self, file_path: &PathBuf) -> Option<&PathConfig> {
+    pub fn get_path_config(&self, file_path: &Path) -> Option<&PathConfig> {
         let file_path_str = file_path.to_string_lossy();
 
         // Find the most specific matching path
@@ -275,7 +262,7 @@ impl Config {
         best_match.map(|(_, config)| config)
     }
 
-    pub fn should_exclude(&self, file_path: &PathBuf) -> bool {
+    pub fn should_exclude(&self, file_path: &Path) -> bool {
         let file_path_str = file_path.to_string_lossy();
 
         // Check global exclude patterns

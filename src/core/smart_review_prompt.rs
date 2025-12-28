@@ -106,9 +106,9 @@ TAGS: [comma-separated relevant tags]
             for chunk in context_chunks {
                 let (start_line, end_line) = chunk.line_range.unwrap_or((1, 1));
                 let description = format!(
-                    "{} - {}",
+                    "{} - {:?}",
                     chunk.file_path.display(),
-                    format!("{:?}", chunk.context_type)
+                    chunk.context_type
                 );
                 let block = format!(
                     "**{}** (lines {}-{}):\n```\n{}\n```\n\n",

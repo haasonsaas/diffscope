@@ -4,17 +4,9 @@ use anyhow::Result;
 
 pub struct PRSummaryGenerator;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SummaryOptions {
     pub include_diagram: bool,
-}
-
-impl Default for SummaryOptions {
-    fn default() -> Self {
-        Self {
-            include_diagram: false,
-        }
-    }
 }
 
 impl PRSummaryGenerator {
@@ -22,7 +14,7 @@ impl PRSummaryGenerator {
     pub async fn generate_summary(
         diffs: &[UnifiedDiff],
         git: &GitIntegration,
-        adapter: &Box<dyn LLMAdapter>,
+        adapter: &dyn LLMAdapter,
     ) -> Result<PRSummary> {
         Self::generate_summary_with_options(diffs, git, adapter, SummaryOptions::default()).await
     }
@@ -30,7 +22,7 @@ impl PRSummaryGenerator {
     pub async fn generate_summary_with_options(
         diffs: &[UnifiedDiff],
         git: &GitIntegration,
-        adapter: &Box<dyn LLMAdapter>,
+        adapter: &dyn LLMAdapter,
         options: SummaryOptions,
     ) -> Result<PRSummary> {
         // Get commit messages for context
@@ -57,7 +49,7 @@ impl PRSummaryGenerator {
 
     pub async fn generate_change_diagram(
         diffs: &[UnifiedDiff],
-        adapter: &Box<dyn LLMAdapter>,
+        adapter: &dyn LLMAdapter,
     ) -> Result<Option<String>> {
         let stats = Self::calculate_stats(diffs);
         let prompt = Self::build_diagram_prompt(diffs, &stats);
@@ -133,7 +125,7 @@ impl PRSummaryGenerator {
         prompt.push_str("Generate a comprehensive PR summary based on the following changes:\n\n");
 
         // Add statistics
-        prompt.push_str(&format!("## Statistics\n"));
+        prompt.push_str("## Statistics\n");
         prompt.push_str(&format!("- Files changed: {}\n", stats.files_changed));
         prompt.push_str(&format!("- Lines added: {}\n", stats.lines_added));
         prompt.push_str(&format!("- Lines removed: {}\n", stats.lines_removed));
@@ -147,7 +139,7 @@ impl PRSummaryGenerator {
             for commit in commits.iter().take(5) {
                 prompt.push_str(&format!("- {}\n", commit));
             }
-            prompt.push_str("\n");
+            prompt.push('\n');
         }
 
         // Add file changes summary
@@ -376,7 +368,7 @@ impl PRSummary {
             for change in &self.key_changes {
                 output.push_str(&format!("- {}\n", change));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Statistics
@@ -406,7 +398,7 @@ impl PRSummary {
                 self.stats.doc_files
             ));
         }
-        output.push_str("\n");
+        output.push('\n');
 
         // Breaking changes
         if let Some(breaking) = &self.breaking_changes {
@@ -444,7 +436,7 @@ fn extract_mermaid_diagram(content: &str) -> Option<String> {
             }
 
             // Seek to mermaid block
-            while let Some(next_line) = lines.next() {
+            for next_line in lines.by_ref() {
                 let next_trimmed = next_line.trim();
                 if next_trimmed.starts_with("```") && next_trimmed.contains("mermaid") {
                     break;
@@ -452,7 +444,7 @@ fn extract_mermaid_diagram(content: &str) -> Option<String> {
             }
 
             let mut diagram_lines = Vec::new();
-            while let Some(block_line) = lines.next() {
+            for block_line in lines.by_ref() {
                 let block_trimmed = block_line.trim();
                 if block_trimmed.starts_with("```") {
                     break;
