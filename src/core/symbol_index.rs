@@ -921,7 +921,11 @@ fn extract_range(value: Option<&Value>) -> Option<(usize, usize)> {
 fn path_to_uri(path: &Path) -> Result<String> {
     let absolute = path.canonicalize()?;
     let path_str = absolute.to_string_lossy().replace('\\', "/");
-    let encoded = path_str.split('/').map(url_encode).collect::<Vec<_>>().join("/");
+    let encoded = path_str
+        .split('/')
+        .map(url_encode)
+        .collect::<Vec<_>>()
+        .join("/");
     Ok(format!("file://{}", encoded))
 }
 
