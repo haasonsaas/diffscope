@@ -6,10 +6,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 concurrency:
   group: publish-image-main
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-push:
