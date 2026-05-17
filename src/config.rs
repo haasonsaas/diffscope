@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -150,7 +150,7 @@ pub struct VaultConfig {
     pub namespace: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubConfig {
     #[serde(default, rename = "github_token")]
     pub token: Option<String>,
@@ -174,6 +174,37 @@ pub struct GitHubConfig {
     /// Webhook secret for verifying GitHub webhook signatures.
     #[serde(default, rename = "github_webhook_secret")]
     pub webhook_secret: Option<String>,
+
+    /// pull_request actions that should start an automated review.
+    ///
+    /// Supported values: opened, synchronize, reopened, review_requested.
+    #[serde(
+        default = "default_github_auto_review_events",
+        rename = "github_auto_review_events"
+    )]
+    pub auto_review_events: Vec<String>,
+
+    /// GitHub user logins that can trigger review_requested automation.
+    ///
+    /// This is intentionally separate from auto_review_events so an org-level
+    /// webhook can listen to pull_request events without reviewing every PR.
+    #[serde(default, rename = "github_review_request_reviewers")]
+    pub review_request_reviewers: Vec<String>,
+}
+
+impl Default for GitHubConfig {
+    fn default() -> Self {
+        Self {
+            token: None,
+            app_id: None,
+            client_id: None,
+            client_secret: None,
+            private_key: None,
+            webhook_secret: None,
+            auto_review_events: default_github_auto_review_events(),
+            review_request_reviewers: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1034,6 +1065,16 @@ impl Config {
                 .ok()
                 .filter(|s| !s.trim().is_empty());
         }
+        if let Ok(events) = std::env::var("DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS") {
+            self.github.auto_review_events = split_csv_list(&events);
+        }
+        if self.github.review_request_reviewers.is_empty() {
+            self.github.review_request_reviewers =
+                std::env::var("DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS")
+                    .ok()
+                    .map(|reviewers| split_csv_list(&reviewers))
+                    .unwrap_or_default();
+        }
         if self.jira.base_url.is_none() {
             self.jira.base_url = std::env::var("DIFFSCOPE_JIRA_BASE_URL")
                 .ok()
@@ -1090,6 +1131,8 @@ impl Config {
         normalize_optional_trimmed(&mut self.github.client_secret);
         normalize_optional_trimmed(&mut self.github.private_key);
         normalize_optional_trimmed(&mut self.github.webhook_secret);
+        normalize_lowercase_list(&mut self.github.auto_review_events);
+        normalize_string_list(&mut self.github.review_request_reviewers);
         normalize_optional_trimmed(&mut self.jira.base_url);
         normalize_optional_trimmed(&mut self.jira.email);
         normalize_optional_trimmed(&mut self.jira.api_token);
@@ -1701,6 +1744,32 @@ impl Config {
                 "github_client_secret is set without github_client_id. The device flow only uses github_client_id today.",
             ));
         }
+        for event in &self.github.auto_review_events {
+            if !matches!(
+                event.as_str(),
+                "opened" | "synchronize" | "reopened" | "review_requested"
+            ) {
+                issues.push(ConfigValidationIssue::warning(
+                    "github_auto_review_events",
+                    format!(
+                        "Unsupported GitHub pull_request action '{}'; supported values are opened, synchronize, reopened, and review_requested.",
+                        event
+                    ),
+                ));
+            }
+        }
+        if self
+            .github
+            .auto_review_events
+            .iter()
+            .any(|event| event == "review_requested")
+            && self.github.review_request_reviewers.is_empty()
+        {
+            issues.push(ConfigValidationIssue::warning(
+                "github_review_request_reviewers",
+                "review_requested automation is enabled but no requested reviewer logins are configured.",
+            ));
+        }
 
         let jira_fields = [
             self.jira.base_url.as_ref(),
@@ -1827,6 +1896,37 @@ fn normalize_optional_trimmed(value: &mut Option<String>) {
         .map(ToOwned::to_owned);
 }
 
+fn split_csv_list(value: &str) -> Vec<String> {
+    value.split(',').map(ToOwned::to_owned).collect()
+}
+
+fn normalize_string_list(values: &mut Vec<String>) {
+    let mut seen = HashSet::new();
+    values.retain_mut(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let normalized_key = trimmed.to_ascii_lowercase();
+        if !seen.insert(normalized_key) {
+            return false;
+        }
+
+        if trimmed.len() != value.len() {
+            *value = trimmed.to_string();
+        }
+        true
+    });
+}
+
+fn normalize_lowercase_list(values: &mut Vec<String>) {
+    normalize_string_list(values);
+    for value in values {
+        *value = value.to_ascii_lowercase();
+    }
+}
+
 fn apply_provider_env_api_key_fallback(
     providers: &mut HashMap<String, ProviderConfig>,
     provider_name: &str,
@@ -1901,6 +2001,10 @@ fn default_model_reasoning() -> Option<String> {
 
 fn default_temperature() -> f32 {
     0.2
+}
+
+fn default_github_auto_review_events() -> Vec<String> {
+    vec!["opened".to_string(), "synchronize".to_string()]
 }
 
 fn default_max_tokens() -> usize {
@@ -2925,6 +3029,88 @@ auditing_model_role: primary
         assert!(issues.iter().any(|issue| issue.field == "github_app"));
         assert!(issues.iter().any(|issue| issue.field == "jira"));
         assert!(issues.iter().any(|issue| issue.field == "vault"));
+    }
+
+    #[test]
+    fn test_github_auto_review_events_default_to_opened_and_synchronize() {
+        let config = Config::default();
+
+        assert_eq!(
+            config.github.auto_review_events,
+            vec!["opened".to_string(), "synchronize".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_config_deserialize_github_review_request_controls() {
+        let config: Config = serde_yaml::from_str(
+            r#"
+github_auto_review_events:
+  - review_requested
+github_review_request_reviewers:
+  - EvalOpsBot
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.github.auto_review_events,
+            vec!["review_requested".to_string()]
+        );
+        assert_eq!(
+            config.github.review_request_reviewers,
+            vec!["EvalOpsBot".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_normalize_github_review_request_controls() {
+        let mut config = Config {
+            github: GitHubConfig {
+                auto_review_events: vec![
+                    " Review_Requested ".to_string(),
+                    "review_requested".to_string(),
+                    "opened".to_string(),
+                    "".to_string(),
+                ],
+                review_request_reviewers: vec![
+                    " EvalOpsBot ".to_string(),
+                    "evalopsbot".to_string(),
+                    "AnotherBot".to_string(),
+                    "".to_string(),
+                ],
+                ..GitHubConfig::default()
+            },
+            ..Config::default()
+        };
+
+        config.normalize();
+
+        assert_eq!(
+            config.github.auto_review_events,
+            vec!["review_requested".to_string(), "opened".to_string()]
+        );
+        assert_eq!(
+            config.github.review_request_reviewers,
+            vec!["EvalOpsBot".to_string(), "AnotherBot".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_validation_warns_when_review_request_enabled_without_reviewers() {
+        let config = Config {
+            github: GitHubConfig {
+                auto_review_events: vec!["review_requested".to_string()],
+                review_request_reviewers: Vec::new(),
+                ..GitHubConfig::default()
+            },
+            ..Config::default()
+        };
+
+        let issues = config.validation_issues();
+        assert!(issues
+            .iter()
+            .any(|issue| issue.field == "github_review_request_reviewers"));
     }
 
     #[test]

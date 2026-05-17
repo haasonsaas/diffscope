@@ -317,6 +317,8 @@ diffscope doctor --base-url http://localhost:11434
 |----------|-------------|
 | `DIFFSCOPE_BASE_URL` | LLM API base URL (also accepts `OPENAI_BASE_URL`) |
 | `DIFFSCOPE_API_KEY` | API key for the LLM endpoint |
+| `DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS` | Comma-separated `pull_request` actions that start webhook reviews, such as `opened,synchronize` or `review_requested` |
+| `DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS` | Comma-separated GitHub logins whose requested reviews trigger `review_requested` automation, for example `EvalOpsBot` |
 
 #### CLI Flags
 | Flag | Description |
@@ -954,6 +956,17 @@ Planned support for responding to pull request comments with interactive command
 @diffscope generate tests         # Generate unit tests
 @diffscope help                   # Show all commands
 ```
+
+### Requested Reviewer Automation
+
+Server webhook deployments can run reviews only when a specific reviewer is requested. For an org-level EvalOpsBot setup, subscribe the GitHub App or webhook to `pull_request` events and run the server with:
+
+```bash
+DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS=review_requested
+DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS=EvalOpsBot
+```
+
+With that configuration, `pull_request.review_requested` starts a full DiffScope review only when GitHub reports `requested_reviewer.login` as `EvalOpsBot`.
 
 ### ✅ Feedback Loop (Reduce Repeated False Positives)
 

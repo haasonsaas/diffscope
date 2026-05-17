@@ -6,6 +6,12 @@ metadata:
     {{- include "diffscope.labels" . | nindent 4 }}
 data:
   DIFFSCOPE_MODEL: {{ .Values.diffscope.model | quote }}
+  {{- if .Values.diffscope.github.autoReviewEvents }}
+  DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS: {{ join "," .Values.diffscope.github.autoReviewEvents | quote }}
+  {{- end }}
+  {{- if .Values.diffscope.github.reviewRequestReviewers }}
+  DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS: {{ join "," .Values.diffscope.github.reviewRequestReviewers | quote }}
+  {{- end }}
   {{- if .Values.diffscope.baseUrl }}
   DIFFSCOPE_BASE_URL: {{ .Values.diffscope.baseUrl | quote }}
   {{- else if .Values.ollama.enabled }}

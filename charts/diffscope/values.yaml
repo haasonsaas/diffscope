@@ -23,6 +23,14 @@ diffscope:
   adapter: ""
   # Base URL for LLM API (auto-set to Ollama service URL when ollama.enabled)
   baseUrl: ""
+  github:
+    # pull_request actions that start server-side reviews.
+    # Set to ["review_requested"] with reviewRequestReviewers for on-demand org review bots.
+    autoReviewEvents:
+      - opened
+      - synchronize
+    # GitHub user logins whose requested reviews trigger review_requested automation.
+    reviewRequestReviewers: []
   extraArgs: []
 
 # -- API keys (stored in a Secret)

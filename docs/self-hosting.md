@@ -69,6 +69,8 @@ config:
 
   extraEnv:
     DIFFSCOPE_SERVER_API_KEY: ${DIFFSCOPE_SERVER_API_KEY}
+    DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS: review_requested
+    DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS: EvalOpsBot
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
 ```
@@ -89,13 +91,21 @@ For enterprise installs, prefer external secret injection over storing credentia
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`
 - `DIFFSCOPE_SERVER_API_KEY`
+- `DIFFSCOPE_WEBHOOK_SECRET`
 - `GITHUB_TOKEN`
 - `DIFFSCOPE_GITHUB_APP_ID`
 - `DIFFSCOPE_GITHUB_PRIVATE_KEY`
+- `DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS`
+- `DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS`
 - `DIFFSCOPE_JIRA_BASE_URL`
 - `DIFFSCOPE_JIRA_EMAIL`
 - `DIFFSCOPE_JIRA_API_TOKEN`
 - `DIFFSCOPE_LINEAR_API_KEY`
+
+For an on-demand review bot, set `DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS=review_requested`
+and `DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS=EvalOpsBot`. The GitHub webhook must
+subscribe to `pull_request` events; DiffScope will ignore review requests for other
+reviewers.
 
 ### Validation behavior
 

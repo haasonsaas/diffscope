@@ -278,6 +278,8 @@ pub async fn handle_webhook(
     let token = config.github.token.clone();
     let github_app_id = config.github.app_id;
     let private_key = config.github.private_key.clone();
+    let auto_review_events = config.github.auto_review_events.clone();
+    let review_request_reviewers = config.github.review_request_reviewers.clone();
     drop(config);
 
     info!(event = %event_type, "Received GitHub webhook");
@@ -289,8 +291,15 @@ pub async fn handle_webhook(
 
             let action = payload["action"].as_str().unwrap_or("");
 
-            // Auto-review on opened or synchronized (new push)
-            if matches!(action, "opened" | "synchronize") {
+            // Auto-review on configured pull_request actions. review_requested
+            // is gated by requested reviewer login so an org webhook can stay
+            // centralized without reviewing every PR.
+            if should_start_review_for_pull_request_action(
+                action,
+                &payload,
+                &auto_review_events,
+                &review_request_reviewers,
+            ) {
                 let repo = payload["repository"]["full_name"]
                     .as_str()
                     .unwrap_or("")
@@ -545,6 +554,43 @@ pub async fn handle_webhook(
     }
 
     Ok(Json(serde_json::json!({ "ok": true, "action": "ignored" })))
+}
+
+fn should_start_review_for_pull_request_action(
+    action: &str,
+    payload: &serde_json::Value,
+    auto_review_events: &[String],
+    review_request_reviewers: &[String],
+) -> bool {
+    if !matches!(
+        action,
+        "opened" | "synchronize" | "reopened" | "review_requested"
+    ) {
+        return false;
+    }
+    if !auto_review_events
+        .iter()
+        .any(|event| event.eq_ignore_ascii_case(action))
+    {
+        return false;
+    }
+    if action != "review_requested" {
+        return true;
+    }
+
+    let Some(login) = requested_reviewer_login(payload) else {
+        return false;
+    };
+    review_request_reviewers
+        .iter()
+        .any(|reviewer| reviewer.trim().eq_ignore_ascii_case(login.trim()))
+}
+
+fn requested_reviewer_login(payload: &serde_json::Value) -> Option<&str> {
+    payload
+        .get("requested_reviewer")
+        .and_then(|reviewer| reviewer.get("login"))
+        .and_then(|login| login.as_str())
 }
 
 fn verify_webhook_signature(secret: &str, body: &str, signature: &str) -> Result<(), String> {
@@ -1157,6 +1203,7 @@ async fn run_webhook_review(state: Arc<AppState>, params: WebhookReviewParams) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_hex_encode() {
@@ -1185,6 +1232,68 @@ mod tests {
         let signature = format!("sha256={expected}");
 
         assert!(verify_webhook_signature(secret, body, &signature).is_ok());
+    }
+
+    #[test]
+    fn review_request_action_matches_configured_reviewer() {
+        let payload = json!({
+            "action": "review_requested",
+            "requested_reviewer": { "login": "evalopsbot" }
+        });
+        let events = vec!["review_requested".to_string()];
+        let reviewers = vec!["EvalOpsBot".to_string()];
+
+        assert!(should_start_review_for_pull_request_action(
+            "review_requested",
+            &payload,
+            &events,
+            &reviewers
+        ));
+    }
+
+    #[test]
+    fn review_request_action_ignores_unconfigured_reviewer() {
+        let payload = json!({
+            "action": "review_requested",
+            "requested_reviewer": { "login": "other-bot" }
+        });
+        let events = vec!["review_requested".to_string()];
+        let reviewers = vec!["EvalOpsBot".to_string()];
+
+        assert!(!should_start_review_for_pull_request_action(
+            "review_requested",
+            &payload,
+            &events,
+            &reviewers
+        ));
+    }
+
+    #[test]
+    fn review_request_action_requires_explicit_event_enablement() {
+        let payload = json!({
+            "action": "review_requested",
+            "requested_reviewer": { "login": "EvalOpsBot" }
+        });
+        let events = vec!["opened".to_string(), "synchronize".to_string()];
+        let reviewers = vec!["EvalOpsBot".to_string()];
+
+        assert!(!should_start_review_for_pull_request_action(
+            "review_requested",
+            &payload,
+            &events,
+            &reviewers
+        ));
+    }
+
+    #[test]
+    fn opened_action_matches_when_enabled_without_reviewer_gate() {
+        let payload = json!({});
+        let events = vec!["opened".to_string()];
+        let reviewers = Vec::new();
+
+        assert!(should_start_review_for_pull_request_action(
+            "opened", &payload, &events, &reviewers
+        ));
     }
 
     #[test]
