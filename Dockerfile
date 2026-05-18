@@ -16,6 +16,7 @@ WORKDIR /app
 
 # Cache dependencies
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./build.rs
 COPY migrations ./migrations
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && \
     mkdir -p web/dist && \
