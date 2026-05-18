@@ -10,6 +10,7 @@ pub(crate) async fn get_doctor(State(state): State<Arc<AppState>>) -> Json<serde
         "embedding": config.resolved_provider_for_role(crate::config::ModelRole::Embedding),
         "fast": config.resolved_provider_for_role(crate::config::ModelRole::Fast),
     });
+    let semantic_feedback_path = crate::core::default_semantic_feedback_path(&config.feedback_path);
 
     let base_url = config
         .base_url
@@ -24,6 +25,18 @@ pub(crate) async fn get_doctor(State(state): State<Arc<AppState>>) -> Json<serde
             "api_key_set": config.api_key.is_some(),
             "context_window": config.context_window,
             "role_providers": role_providers,
+        },
+        "learning": {
+            "enhanced_feedback": config.enhanced_feedback,
+            "semantic_feedback": config.semantic_feedback,
+            "semantic_rag": config.semantic_rag,
+            "feedback_path": config.feedback_path.display().to_string(),
+            "semantic_feedback_path": semantic_feedback_path.display().to_string(),
+            "feedback_store_exists": config.feedback_path.exists(),
+            "semantic_feedback_store_exists": semantic_feedback_path.exists(),
+            "min_feedback_observations": config.feedback_min_observations,
+            "semantic_feedback_min_examples": config.semantic_feedback_min_examples,
+            "semantic_feedback_similarity": config.semantic_feedback_similarity,
         },
         "validation_issues": validation_issues,
         "endpoint_reachable": false,

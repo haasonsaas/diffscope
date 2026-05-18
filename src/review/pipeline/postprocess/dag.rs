@@ -146,12 +146,14 @@ fn stage_hints(stage: ReviewPostprocessStage) -> DagNodeExecutionHints {
         ReviewPostprocessStage::SaveConventionStore => DagNodeExecutionHints {
             parallelizable: false,
             retryable: true,
+            timeout_ms: Some(10_000),
             side_effects: true,
             subgraph: None,
         },
         _ => DagNodeExecutionHints {
             parallelizable: false,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: None,
         },

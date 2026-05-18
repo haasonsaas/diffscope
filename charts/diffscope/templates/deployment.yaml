@@ -98,6 +98,12 @@ spec:
             - configMapRef:
                 name: {{ include "diffscope.fullname" . }}
           env:
+            - name: DIFFSCOPE_SERVER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "diffscope.secretName" . }}
+                  key: {{ .Values.secrets.existingSecretKeys.serverApiKey }}
+                  optional: true
             - name: DIFFSCOPE_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -121,6 +127,36 @@ spec:
                 secretKeyRef:
                   name: {{ include "diffscope.secretName" . }}
                   key: {{ .Values.secrets.existingSecretKeys.anthropicApiKey }}
+                  optional: true
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "diffscope.secretName" . }}
+                  key: {{ .Values.secrets.existingSecretKeys.githubToken }}
+                  optional: true
+            - name: DIFFSCOPE_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "diffscope.secretName" . }}
+                  key: {{ .Values.secrets.existingSecretKeys.githubAppId }}
+                  optional: true
+            - name: DIFFSCOPE_GITHUB_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "diffscope.secretName" . }}
+                  key: {{ .Values.secrets.existingSecretKeys.githubPrivateKey }}
+                  optional: true
+            - name: DIFFSCOPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "diffscope.secretName" . }}
+                  key: {{ .Values.secrets.existingSecretKeys.githubWebhookSecret }}
+                  optional: true
+            - name: DIFFSCOPE_AUTOMATION_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "diffscope.secretName" . }}
+                  key: {{ .Values.secrets.existingSecretKeys.automationWebhookSecret }}
                   optional: true
           livenessProbe:
             httpGet:

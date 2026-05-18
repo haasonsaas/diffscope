@@ -61,11 +61,37 @@ echo "Latest release: $LATEST_RELEASE"
 
 # Download URL
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_RELEASE/diffscope-$TARGET"
+CHECKSUM_URL="$DOWNLOAD_URL.sha256"
 
 # Download binary
 echo "Downloading $BINARY_NAME for $TARGET..."
 TMP_FILE=$(mktemp)
-curl -L "$DOWNLOAD_URL" -o "$TMP_FILE"
+TMP_SHA=$(mktemp)
+cleanup() {
+    rm -f "$TMP_FILE" "$TMP_SHA"
+}
+trap cleanup EXIT
+
+curl -fsSL "$DOWNLOAD_URL" -o "$TMP_FILE"
+
+echo "Verifying checksum..."
+curl -fsSL "$CHECKSUM_URL" -o "$TMP_SHA"
+EXPECTED_SHA=$(awk '{print $1}' "$TMP_SHA")
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL_SHA=$(sha256sum "$TMP_FILE" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL_SHA=$(shasum -a 256 "$TMP_FILE" | awk '{print $1}')
+else
+    echo "No sha256 checker found. Install sha256sum or shasum and retry."
+    exit 1
+fi
+
+if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+    echo "Checksum verification failed for $DOWNLOAD_URL"
+    echo "expected: $EXPECTED_SHA"
+    echo "actual:   $ACTUAL_SHA"
+    exit 1
+fi
 
 # Make executable
 chmod +x "$TMP_FILE"

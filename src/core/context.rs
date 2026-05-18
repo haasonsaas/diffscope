@@ -1,7 +1,7 @@
 use anyhow::Result;
 use glob::glob;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -83,12 +83,14 @@ impl ContextFetcher {
 
     pub async fn fetch_context_for_file(
         &self,
-        file_path: &PathBuf,
+        file_path: &Path,
         lines: &[(usize, usize)],
     ) -> Result<Vec<LLMContextChunk>> {
         let mut chunks = Vec::new();
 
-        let full_path = self.repo_path.join(file_path);
+        let Some(full_path) = resolve_inside_base(&self.repo_path, file_path) else {
+            return Ok(chunks);
+        };
         if full_path.exists() {
             let content = read_file_lossy(&full_path).await?;
             let file_lines: Vec<&str> = content.lines().collect();
@@ -119,7 +121,7 @@ impl ContextFetcher {
                         MAX_CONTEXT_CHARS,
                     );
                     chunks.push(
-                        LLMContextChunk::file_content(file_path.clone(), chunk_content)
+                        LLMContextChunk::file_content(file_path.to_path_buf(), chunk_content)
                             .with_line_range((expanded_start, expanded_end)),
                     );
                 }
@@ -149,25 +151,29 @@ impl ContextFetcher {
             return Ok(chunks);
         }
 
-        let mut matched_paths = HashSet::new();
+        let base_path = canonical_base(base_path)?;
+        let mut matched_paths = BTreeSet::new();
         for pattern in patterns {
             let pattern_path = if Path::new(pattern).is_absolute() {
-                pattern.clone()
+                pattern.to_string()
             } else {
                 base_path.join(pattern).to_string_lossy().to_string()
             };
 
             if let Ok(entries) = glob(&pattern_path) {
                 for path in entries.flatten() {
-                    if path.is_file() {
-                        matched_paths.insert(path);
+                    let Some(safe_path) = canonical_file_inside_base(&base_path, &path) else {
+                        continue;
+                    };
+                    if safe_path.is_file() {
+                        matched_paths.insert(safe_path);
                     }
                 }
             }
         }
 
         for path in matched_paths.into_iter().take(max_files) {
-            let relative_path = path.strip_prefix(base_path).unwrap_or(&path);
+            let relative_path = path.strip_prefix(&base_path).unwrap_or(&path);
             let content = read_file_lossy(&path).await?;
             let snippet = content
                 .lines()
@@ -190,7 +196,7 @@ impl ContextFetcher {
 
     pub async fn fetch_related_definitions(
         &self,
-        file_path: &PathBuf,
+        file_path: &Path,
         symbols: &[String],
     ) -> Result<Vec<LLMContextChunk>> {
         let mut chunks = Vec::new();
@@ -200,7 +206,9 @@ impl ContextFetcher {
         }
 
         // Search for symbol definitions in the same file first
-        let full_path = self.repo_path.join(file_path);
+        let Some(full_path) = resolve_inside_base(&self.repo_path, file_path) else {
+            return Ok(chunks);
+        };
         if full_path.exists() {
             if let Ok(content) = read_file_lossy(&full_path).await {
                 let lines: Vec<&str> = content.lines().collect();
@@ -226,8 +234,11 @@ impl ContextFetcher {
                             );
 
                             chunks.push(
-                                LLMContextChunk::definition(file_path.clone(), definition_content)
-                                    .with_line_range((start_line + 1, end_line)),
+                                LLMContextChunk::definition(
+                                    file_path.to_path_buf(),
+                                    definition_content,
+                                )
+                                .with_line_range((start_line + 1, end_line)),
                             );
                         }
                     }
@@ -332,6 +343,29 @@ fn merge_ranges(lines: &[(usize, usize)]) -> Vec<(usize, usize)> {
 
 const MAX_CONTEXT_CHARS: usize = 8000;
 
+fn canonical_base(base_path: &Path) -> Result<PathBuf> {
+    Ok(base_path.canonicalize()?)
+}
+
+fn canonical_file_inside_base(base_path: &Path, path: &Path) -> Option<PathBuf> {
+    let canonical_path = path.canonicalize().ok()?;
+    if canonical_path.starts_with(base_path) {
+        Some(canonical_path)
+    } else {
+        None
+    }
+}
+
+fn resolve_inside_base(base_path: &Path, path: &Path) -> Option<PathBuf> {
+    let base_path = canonical_base(base_path).ok()?;
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_path.join(path)
+    };
+    canonical_file_inside_base(&base_path, &candidate)
+}
+
 fn truncate_with_notice(mut content: String, max_chars: usize) -> String {
     if max_chars == 0 || content.len() <= max_chars {
         return content;
@@ -429,6 +463,47 @@ mod tests {
         // Should expand to include the function signature (line 3)
         let chunk = &chunks[0];
         assert!(chunk.content.contains("pub fn process"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_context_rejects_parent_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(dir.path().join("outside.rs"), "pub fn secret() {}\n").unwrap();
+
+        let fetcher = ContextFetcher::new(repo);
+        let chunks = fetcher
+            .fetch_context_for_file(&PathBuf::from("../outside.rs"), &[(1, 1)])
+            .await
+            .unwrap();
+
+        assert!(chunks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_additional_context_rejects_absolute_and_parent_traversal_outside_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let docs = repo.join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("review.md"), "safe note").unwrap();
+        std::fs::write(dir.path().join("secret.md"), "do not read").unwrap();
+
+        let fetcher = ContextFetcher::new(repo.clone());
+        let chunks = fetcher
+            .fetch_additional_context(&[
+                "docs/*.md".to_string(),
+                "../*.md".to_string(),
+                dir.path().join("secret.md").display().to_string(),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].file_path, PathBuf::from("docs/review.md"));
+        assert!(chunks[0].content.contains("safe note"));
+        assert!(!chunks[0].content.contains("do not read"));
     }
 
     #[tokio::test]

@@ -190,6 +190,7 @@ fn stage_hints(stage: EvalFixtureStage) -> DagNodeExecutionHints {
         EvalFixtureStage::Review => DagNodeExecutionHints {
             parallelizable: false,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: Some("review_pipeline".to_string()),
         },
@@ -199,18 +200,21 @@ fn stage_hints(stage: EvalFixtureStage) -> DagNodeExecutionHints {
         | EvalFixtureStage::BenchmarkMetrics => DagNodeExecutionHints {
             parallelizable: true,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: None,
         },
         EvalFixtureStage::ReproductionValidation => DagNodeExecutionHints {
             parallelizable: true,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: None,
         },
         EvalFixtureStage::ArtifactCapture => DagNodeExecutionHints {
             parallelizable: false,
             retryable: true,
+            timeout_ms: Some(10_000),
             side_effects: true,
             subgraph: None,
         },

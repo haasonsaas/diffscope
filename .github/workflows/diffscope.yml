@@ -1,7 +1,7 @@
 name: DiffScope Review
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, review_requested]
 
 permissions:
   contents: read
@@ -20,61 +20,109 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
-          
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build current DiffScope binary
+        run: cargo build --release
+
       - name: Get PR diff
-        id: diff
         run: |
           git fetch origin ${{ github.base_ref }} --depth=1
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
-          
-      - name: Check API key
-        id: check_key
+
+      - name: Select review provider
+        id: provider
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::DiffScope review skipped — OPENAI_API_KEY secret not configured"
+          if [ -n "${ANTHROPIC_API_KEY}" ]; then
+            {
+              echo "configured=true"
+              echo "model=anthropic/claude-opus-4.5"
+              echo "adapter=anthropic"
+            } >> "$GITHUB_OUTPUT"
+          elif [ -n "${OPENROUTER_API_KEY}" ]; then
+            {
+              echo "configured=true"
+              echo "model=anthropic/claude-opus-4.5"
+              echo "adapter=openrouter"
+            } >> "$GITHUB_OUTPUT"
+          elif [ -n "${OPENAI_API_KEY}" ]; then
+            {
+              echo "configured=true"
+              echo "model=gpt-4o"
+              echo "adapter=openai"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DiffScope review skipped; no ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY secret is configured"
           fi
 
-      - name: Check image available
-        id: check_image
+      - name: Run DiffScope from this branch
+        if: steps.provider.outputs.configured == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          docker pull ghcr.io/evalops/diffscope:latest 2>/dev/null && echo "available=true" >> "$GITHUB_OUTPUT" || echo "available=false" >> "$GITHUB_OUTPUT"
+          ./target/release/diffscope \
+            --model "${{ steps.provider.outputs.model }}" \
+            --adapter "${{ steps.provider.outputs.adapter }}" \
+            --output-format json \
+            review --diff pr.diff --output comments.json
 
-      - name: Notice image unavailable
-        if: steps.check_image.outputs.available == 'false'
-        run: echo "::notice::DiffScope review skipped — image ghcr.io/evalops/diffscope:latest not available (merge to main publishes it)"
-
-      - name: Run DiffScope
-        if: steps.check_key.outputs.skip != 'true' && steps.check_image.outputs.available == 'true'
-        run: |
-          docker run --rm \
-            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-            -v "$PWD":/workspace -w /workspace \
-            ghcr.io/evalops/diffscope:latest \
-            review --diff pr.diff --output-format json --output comments.json
+      - name: Upload review artifact
+        if: always() && steps.provider.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diffscope-review-${{ github.event.pull_request.number }}
+          path: comments.json
+          if-no-files-found: ignore
 
       - name: Post comments
-        if: steps.check_key.outputs.skip != 'true' && steps.check_image.outputs.available == 'true'
+        if: steps.provider.outputs.configured == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            if (!fs.existsSync('comments.json')) {
+              core.notice('DiffScope did not produce comments.json');
+              return;
+            }
             const comments = JSON.parse(fs.readFileSync('comments.json', 'utf8'));
             const headSha = context.payload.pull_request.head.sha;
             const fallback = [];
-            
+
             for (const comment of comments) {
               if (!comment.file_path || !comment.line_number || comment.line_number < 1) {
                 continue;
               }
+              const body = [
+                `**${comment.severity}**: ${comment.content}`,
+                comment.suggestion ? `\nSuggestion: ${comment.suggestion}` : ''
+              ].join('');
               try {
                 await github.rest.pulls.createReviewComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   pull_number: context.issue.number,
-                  body: `**${comment.severity}**: ${comment.content}`,
+                  body,
                   commit_id: headSha,
                   path: comment.file_path,
                   line: comment.line_number,
@@ -90,7 +138,7 @@ jobs:
                 "Some review comments could not be placed inline and are listed below:",
                 "",
                 ...fallback.slice(0, 100)
-              ].join("\\n");
+              ].join("\n");
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

@@ -119,6 +119,7 @@ fn stage_hints(stage: ReviewPipelineStage) -> DagNodeExecutionHints {
         | ReviewPipelineStage::Postprocess => DagNodeExecutionHints {
             parallelizable: false,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: match stage {
                 ReviewPipelineStage::Postprocess => Some("review_postprocess".to_string()),
@@ -128,6 +129,7 @@ fn stage_hints(stage: ReviewPipelineStage) -> DagNodeExecutionHints {
         ReviewPipelineStage::ExecuteJobs => DagNodeExecutionHints {
             parallelizable: true,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: None,
         },

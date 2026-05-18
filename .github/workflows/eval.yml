@@ -17,9 +17,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Run always-on review contract tests
+        run: |
+          cargo test fetch_additional_context_rejects_absolute_and_parent_traversal_outside_base
+          cargo test fetch_context_rejects_parent_traversal
+          cargo test resolve_pattern_repositories_rejects_parent_traversal_local_paths
+          cargo test resolve_pattern_repositories_rejects_absolute_local_paths_outside_repo
+          cargo test build_verification_prompt_sanitizes_adversarial_finding_text
+          cargo test execute_dag_retries_retryable_nodes
+          cargo test execute_dag_applies_node_timeout
+
   eval:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: contracts
     steps:
       - name: Check eval secret
         id: secret-check
@@ -59,6 +77,7 @@ jobs:
             --model gpt-4o-mini \
             --temperature 0 \
             --fixtures eval/fixtures \
+            --artifact-dir /tmp/eval-baseline-artifacts \
             --output /tmp/eval-baseline.json
 
       - name: Run eval thresholds on current branch
@@ -71,14 +90,15 @@ jobs:
             --temperature 0 \
             --fixtures eval/fixtures \
             --output eval-current.json \
+            --artifact-dir eval-artifacts \
             --baseline /tmp/eval-baseline.json \
-            --max-micro-f1-drop 0.20 \
-            --min-micro-f1 0.20 \
-            --min-verification-health 0.80 \
+            --max-micro-f1-drop 0.15 \
+            --min-micro-f1 0.25 \
+            --min-verification-health 0.85 \
             --min-rule-f1 sec.shell.injection=0.10 \
             --min-rule-f1 reliability.unwrap_panic=0.10 \
-            --max-rule-f1-drop sec.shell.injection=0.25 \
-            --max-rule-f1-drop reliability.unwrap_panic=0.25
+            --max-rule-f1-drop sec.shell.injection=0.20 \
+            --max-rule-f1-drop reliability.unwrap_panic=0.20
 
       - name: Upload eval reports
         if: ${{ always() && steps.secret-check.outputs.configured == 'true' }}
@@ -87,8 +107,10 @@ jobs:
           name: eval-reports
           path: |
             eval-current.json
+            eval-artifacts/**
             /tmp/eval-baseline.json
+            /tmp/eval-baseline-artifacts/**
 
       - name: Skip message
         if: ${{ steps.secret-check.outputs.configured != 'true' }}
-        run: echo "Skipping eval workflow because OPENAI_API_KEY secret is not configured."
+        run: echo "Skipping live eval workflow because OPENAI_API_KEY secret is not configured; offline contract tests still ran."

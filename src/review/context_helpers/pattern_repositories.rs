@@ -110,6 +110,44 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_pattern_repositories_rejects_parent_traversal_local_paths() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let repo_root = tempdir.path().join("repo");
+        let outside_repo = tempdir.path().join("outside-rules");
+        std::fs::create_dir_all(&repo_root).unwrap();
+        std::fs::create_dir_all(&outside_repo).unwrap();
+
+        let mut config = config::Config::default();
+        config.pattern_repositories = vec![config::PatternRepositoryConfig {
+            source: "../outside-rules".to_string(),
+            ..Default::default()
+        }];
+
+        let resolved = resolve_pattern_repositories_with(&config, &repo_root, |_| None);
+
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_pattern_repositories_rejects_absolute_local_paths_outside_repo() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let repo_root = tempdir.path().join("repo");
+        let outside_repo = tempdir.path().join("outside-rules");
+        std::fs::create_dir_all(&repo_root).unwrap();
+        std::fs::create_dir_all(&outside_repo).unwrap();
+
+        let mut config = config::Config::default();
+        config.pattern_repositories = vec![config::PatternRepositoryConfig {
+            source: outside_repo.display().to_string(),
+            ..Default::default()
+        }];
+
+        let resolved = resolve_pattern_repositories_with(&config, &repo_root, |_| None);
+
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
     fn test_resolve_pattern_repositories_accepts_git_sources_via_checkout_helper() {
         let tempdir = tempfile::tempdir().unwrap();
         let repo_root = tempdir.path();

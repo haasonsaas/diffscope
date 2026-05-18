@@ -3,6 +3,7 @@ name = "diffscope"
 version = "0.5.28"
 edition = "2021"
 rust-version = "1.88"
+build = "build.rs"
 authors = ["Jonathan Haas <jonathan@haas.holdings>"]
 description = "A composable code review engine with smart analysis, confidence scoring, and professional reporting"
 license = "Apache-2.0"

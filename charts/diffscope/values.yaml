@@ -35,17 +35,31 @@ diffscope:
 
 # -- API keys (stored in a Secret)
 secrets:
+  # API key for protected DiffScope server mutation routes.
+  serverApiKey: ""
+  # Legacy/top-level LLM API key fallback. Prefer provider-specific keys below.
   diffscopeApiKey: ""
   openaiApiKey: ""
   openrouterApiKey: ""
   anthropicApiKey: ""
+  githubToken: ""
+  githubAppId: ""
+  githubPrivateKey: ""
+  githubWebhookSecret: ""
+  automationWebhookSecret: ""
   # Use an existing secret instead of creating one
   existingSecret: ""
   existingSecretKeys:
+    serverApiKey: "DIFFSCOPE_SERVER_API_KEY"
     diffscopeApiKey: "DIFFSCOPE_API_KEY"
     openaiApiKey: "OPENAI_API_KEY"
     openrouterApiKey: "OPENROUTER_API_KEY"
     anthropicApiKey: "ANTHROPIC_API_KEY"
+    githubToken: "GITHUB_TOKEN"
+    githubAppId: "DIFFSCOPE_GITHUB_APP_ID"
+    githubPrivateKey: "DIFFSCOPE_GITHUB_PRIVATE_KEY"
+    githubWebhookSecret: "DIFFSCOPE_WEBHOOK_SECRET"
+    automationWebhookSecret: "DIFFSCOPE_AUTOMATION_WEBHOOK_SECRET"
 
 # -- Non-secret environment config
 config:

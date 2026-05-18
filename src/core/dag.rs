@@ -3,7 +3,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::Hash;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 
 pub trait DagNode: Clone + Eq + Hash {
@@ -62,6 +62,8 @@ pub struct DagGraphContract {
 pub struct DagNodeExecutionHints {
     pub parallelizable: bool,
     pub retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
     pub side_effects: bool,
     pub subgraph: Option<String>,
 }
@@ -152,7 +154,7 @@ where
 
         let started = Instant::now();
         if spec.enabled {
-            execute(spec.id.clone(), context).await?;
+            execute_node_with_policy(&spec, context, &mut execute).await?;
         }
         records.push(DagExecutionRecord {
             name: spec.id.name().to_string(),
@@ -217,7 +219,9 @@ where
             }
             if !spec.hints.parallelizable {
                 let started = Instant::now();
-                let output = spawn(spec.id.clone())?.await?;
+                let output = execute_spawned_task_once(spawn(spec.id.clone())?, &spec.hints)
+                    .await
+                    .map_err(|error| annotate_node_error(spec.id.name(), &spec.hints, error))?;
                 apply(spec.id.clone(), output)?;
                 recorded.push((
                     launch_sequence,
@@ -242,10 +246,13 @@ where
             launch_sequence += 1;
             let id = spec.id.clone();
             let future = spawn(id.clone())?;
+            let hints = spec.hints.clone();
             let started = Instant::now();
             in_flight.insert(id.clone());
             join_set.spawn(async move {
-                let output = future.await;
+                let output = execute_spawned_task_once(future, &hints)
+                    .await
+                    .map_err(|error| annotate_node_error(id.name(), &hints, error));
                 (sequence, id, started.elapsed().as_millis() as u64, output)
             });
         }
@@ -276,6 +283,82 @@ where
 
     recorded.sort_by_key(|(sequence, _)| *sequence);
     Ok(recorded.into_iter().map(|(_, record)| record).collect())
+}
+
+async fn execute_node_with_policy<NodeId, Context, F>(
+    spec: &DagNodeSpec<NodeId>,
+    context: &mut Context,
+    execute: &mut F,
+) -> Result<()>
+where
+    NodeId: DagNode,
+    Context: Send,
+    F: for<'a> FnMut(NodeId, &'a mut Context) -> BoxFuture<'a, Result<()>>,
+{
+    let max_attempts = max_attempts_for_hints(&spec.hints);
+    let mut attempt = 1usize;
+
+    loop {
+        let outcome = if let Some(timeout) = timeout_for_hints(&spec.hints) {
+            match tokio::time::timeout(timeout, execute(spec.id.clone(), context)).await {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!(
+                    "DAG node '{}' timed out after {}ms",
+                    spec.id.name(),
+                    timeout.as_millis()
+                )),
+            }
+        } else {
+            execute(spec.id.clone(), context).await
+        };
+
+        match outcome {
+            Ok(()) => return Ok(()),
+            Err(_) if attempt < max_attempts => {
+                attempt += 1;
+                continue;
+            }
+            Err(error) => return Err(annotate_node_error(spec.id.name(), &spec.hints, error)),
+        }
+    }
+}
+
+async fn execute_spawned_task_once<TaskOutput>(
+    future: BoxFuture<'static, Result<TaskOutput>>,
+    hints: &DagNodeExecutionHints,
+) -> Result<TaskOutput>
+where
+    TaskOutput: Send + 'static,
+{
+    if let Some(timeout) = timeout_for_hints(hints) {
+        match tokio::time::timeout(timeout, future).await {
+            Ok(result) => result,
+            Err(_) => anyhow::bail!("DAG task timed out after {}ms", timeout.as_millis()),
+        }
+    } else {
+        future.await
+    }
+}
+
+fn max_attempts_for_hints(hints: &DagNodeExecutionHints) -> usize {
+    if hints.retryable {
+        2
+    } else {
+        1
+    }
+}
+
+fn timeout_for_hints(hints: &DagNodeExecutionHints) -> Option<Duration> {
+    hints.timeout_ms.map(Duration::from_millis)
+}
+
+fn annotate_node_error(
+    node_name: &str,
+    hints: &DagNodeExecutionHints,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let attempts = max_attempts_for_hints(hints);
+    anyhow::anyhow!("DAG node '{node_name}' failed after {attempts} attempt(s): {error}")
 }
 
 pub fn plan_dag_execution(
@@ -373,6 +456,7 @@ mod tests {
         DagNodeExecutionHints {
             parallelizable,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: None,
         }
@@ -433,6 +517,92 @@ mod tests {
         assert_eq!(records.len(), 3);
     }
 
+    #[tokio::test]
+    async fn execute_dag_retries_retryable_nodes_once() {
+        let specs = vec![DagNodeSpec {
+            id: TestNode::Root,
+            dependencies: vec![],
+            hints: hints(false),
+            enabled: true,
+        }];
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        execute_dag(&specs, &mut (), |_, _| {
+            let attempts = Arc::clone(&attempts);
+            async move {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    anyhow::bail!("transient failure");
+                }
+                Ok(())
+            }
+            .boxed()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn execute_dag_does_not_retry_non_retryable_nodes() {
+        let specs = vec![DagNodeSpec {
+            id: TestNode::Root,
+            dependencies: vec![],
+            hints: DagNodeExecutionHints {
+                parallelizable: false,
+                retryable: false,
+                timeout_ms: None,
+                side_effects: false,
+                subgraph: None,
+            },
+            enabled: true,
+        }];
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let error = execute_dag(&specs, &mut (), |_, _| {
+            let attempts = Arc::clone(&attempts);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("permanent failure")
+            }
+            .boxed()
+        })
+        .await
+        .unwrap_err();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert!(error.to_string().contains("failed after 1 attempt"));
+    }
+
+    #[tokio::test]
+    async fn execute_dag_applies_node_timeout() {
+        let specs = vec![DagNodeSpec {
+            id: TestNode::Root,
+            dependencies: vec![],
+            hints: DagNodeExecutionHints {
+                parallelizable: false,
+                retryable: false,
+                timeout_ms: Some(10),
+                side_effects: false,
+                subgraph: None,
+            },
+            enabled: true,
+        }];
+
+        let error = execute_dag(&specs, &mut (), |_, _| {
+            async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok(())
+            }
+            .boxed()
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("timed out after 10ms"));
+    }
+
     #[test]
     fn describe_dag_reports_names_and_dependencies() {
         let descriptions = describe_dag(&[
@@ -473,6 +643,7 @@ mod tests {
                     hints: DagNodeExecutionHints {
                         parallelizable: false,
                         retryable: true,
+                        timeout_ms: None,
                         side_effects: false,
                         subgraph: None,
                     },
@@ -488,6 +659,7 @@ mod tests {
                     hints: DagNodeExecutionHints {
                         parallelizable: true,
                         retryable: true,
+                        timeout_ms: None,
                         side_effects: false,
                         subgraph: Some("child".to_string()),
                     },
@@ -524,6 +696,7 @@ mod tests {
                     hints: DagNodeExecutionHints {
                         parallelizable: false,
                         retryable: true,
+                        timeout_ms: None,
                         side_effects: false,
                         subgraph: None,
                     },
@@ -539,6 +712,7 @@ mod tests {
                     hints: DagNodeExecutionHints {
                         parallelizable: true,
                         retryable: true,
+                        timeout_ms: None,
                         side_effects: false,
                         subgraph: None,
                     },

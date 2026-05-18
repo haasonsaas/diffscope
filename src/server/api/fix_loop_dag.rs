@@ -310,6 +310,7 @@ fn stage_hints(stage: FixLoopDagStage) -> DagNodeExecutionHints {
             DagNodeExecutionHints {
                 parallelizable: false,
                 retryable: true,
+                timeout_ms: None,
                 side_effects: true,
                 subgraph: Some("review_pipeline".to_string()),
             }
@@ -317,6 +318,7 @@ fn stage_hints(stage: FixLoopDagStage) -> DagNodeExecutionHints {
         _ => DagNodeExecutionHints {
             parallelizable: false,
             retryable: true,
+            timeout_ms: None,
             side_effects: false,
             subgraph: None,
         },

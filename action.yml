@@ -7,15 +7,21 @@ branding:
 
 inputs:
   model:
-    description: 'LLM model to use (e.g., gpt-4o, ollama:codellama)'
+    description: 'LLM model to use (e.g., anthropic/claude-opus-4.5, openai/gpt-4o, ollama:codellama)'
     required: false
-    default: 'gpt-4o'
+    default: 'anthropic/claude-opus-4.5'
   output-format:
     description: 'Output format (json, patch, markdown)'
     required: false
     default: 'json'
   openai-api-key:
     description: 'OpenAI API key (can also use OPENAI_API_KEY env var)'
+    required: false
+  anthropic-api-key:
+    description: 'Anthropic API key (can also use ANTHROPIC_API_KEY env var)'
+    required: false
+  openrouter-api-key:
+    description: 'OpenRouter API key (can also use OPENROUTER_API_KEY env var)'
     required: false
 
 runs:
@@ -29,3 +35,5 @@ runs:
     - ${{ inputs.output-format }}
   env:
     OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+    ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+    OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}

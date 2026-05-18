@@ -42,8 +42,16 @@ diffscope:
 
 gitRepo:
   enabled: true
-  repository: https://github.com/your-org/your-repo.git
+  url: https://github.com/your-org/your-repo.git
   branch: main
+
+secrets:
+  serverApiKey: ${DIFFSCOPE_SERVER_API_KEY}
+  githubWebhookSecret: ${DIFFSCOPE_WEBHOOK_SECRET}
+  githubAppId: ${DIFFSCOPE_GITHUB_APP_ID}
+  githubPrivateKey: ${DIFFSCOPE_GITHUB_PRIVATE_KEY}
+  anthropicApiKey: ${ANTHROPIC_API_KEY}
+  openrouterApiKey: ${OPENROUTER_API_KEY}
 
 persistence:
   enabled: true
@@ -68,11 +76,8 @@ config:
       trend_history_max_entries: 200
 
   extraEnv:
-    DIFFSCOPE_SERVER_API_KEY: ${DIFFSCOPE_SERVER_API_KEY}
     DIFFSCOPE_GITHUB_AUTO_REVIEW_EVENTS: review_requested
     DIFFSCOPE_GITHUB_REVIEW_REQUEST_REVIEWERS: EvalOpsBot
-    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-    OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
 ```
 
 Notes:

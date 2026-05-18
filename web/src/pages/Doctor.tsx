@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Stethoscope, RefreshCw, CheckCircle, XCircle, Cpu, Zap } from 'lucide-react'
+import { Stethoscope, RefreshCw, CheckCircle, XCircle, Cpu, Zap, BrainCircuit } from 'lucide-react'
 import { api } from '../api/client'
 import type { DoctorResponse } from '../api/types'
 
@@ -89,6 +89,36 @@ export function Doctor() {
               )}
             </div>
           </div>
+
+          {result.learning && (
+            <div className="bg-surface-1 border border-border rounded-lg p-4">
+              <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
+                <BrainCircuit size={13} />
+                Learning & Evidence
+              </h3>
+              <div className="grid grid-cols-2 gap-3 text-[12px]">
+                {[
+                  ['Aggregate feedback', result.learning.enhanced_feedback ? 'on' : 'off'],
+                  ['Semantic feedback', result.learning.semantic_feedback ? 'on' : 'off'],
+                  ['Semantic retrieval', result.learning.semantic_rag ? 'on' : 'off'],
+                  ['Feedback store', result.learning.feedback_store_exists ? 'present' : 'empty'],
+                  ['Semantic store', result.learning.semantic_feedback_store_exists ? 'present' : 'empty'],
+                  ['Min observations', String(result.learning.min_feedback_observations)],
+                  ['Min semantic examples', String(result.learning.semantic_feedback_min_examples)],
+                  ['Semantic similarity', String(result.learning.semantic_feedback_similarity)],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex justify-between gap-3">
+                    <span className="text-text-muted">{label}</span>
+                    <span className="font-code text-text-primary truncate">{value}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 space-y-1 text-[11px] font-code text-text-muted">
+                <div className="truncate">{result.learning.feedback_path}</div>
+                <div className="truncate">{result.learning.semantic_feedback_path}</div>
+              </div>
+            </div>
+          )}
 
           {/* Models */}
           {result.models.length > 0 && (

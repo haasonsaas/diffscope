@@ -306,6 +306,18 @@ export interface DoctorResponse {
     api_key_set: boolean
     context_window?: number
   }
+  learning?: {
+    enhanced_feedback: boolean
+    semantic_feedback: boolean
+    semantic_rag: boolean
+    feedback_path: string
+    semantic_feedback_path: string
+    feedback_store_exists: boolean
+    semantic_feedback_store_exists: boolean
+    min_feedback_observations: number
+    semantic_feedback_min_examples: number
+    semantic_feedback_similarity: number
+  }
   endpoint_reachable: boolean
   endpoint_type?: string
   models: DoctorModel[]
