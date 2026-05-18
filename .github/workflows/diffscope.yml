@@ -1,7 +1,7 @@
 name: DiffScope Review
 on:
   pull_request:
-    types: [opened, synchronize, reopened, review_requested]
+    types: [opened, synchronize, reopened, ready_for_review, review_requested]
 
 permissions:
   contents: read
