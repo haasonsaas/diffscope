@@ -91,6 +91,7 @@ jobs:
         if: always() && steps.provider.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 14
           name: diffscope-review-${{ github.event.pull_request.number }}
           path: comments.json
           if-no-files-found: ignore

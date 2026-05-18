@@ -104,6 +104,7 @@ jobs:
         if: ${{ always() && steps.secret-check.outputs.configured == 'true' }}
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 14
           name: eval-reports
           path: |
             eval-current.json
