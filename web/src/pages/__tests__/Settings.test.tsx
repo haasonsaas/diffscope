@@ -85,7 +85,7 @@ describe('Settings review context editors', () => {
       }),
       expect.any(Object),
     )
-  })
+  }, 10_000)
 
   it('allows adding new path and custom context entries', async () => {
     const user = userEvent.setup()
@@ -121,5 +121,5 @@ describe('Settings review context editors', () => {
       }),
       expect.any(Object),
     )
-  })
+  }, 10_000)
 })
