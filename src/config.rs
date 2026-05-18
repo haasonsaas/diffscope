@@ -771,6 +771,10 @@ pub struct PluginConfig {
     /// Rust compile-regression analysis for high-confidence struct initializer removals.
     #[serde(default = "default_true")]
     pub rust_compile: bool,
+
+    /// SARIF/code-scanning report paths to ingest as analyzer evidence.
+    #[serde(default)]
+    pub sarif_reports: Vec<String>,
 }
 
 impl Default for PluginConfig {
@@ -782,6 +786,7 @@ impl Default for PluginConfig {
             secret_scanner: true,
             supply_chain: true,
             rust_compile: true,
+            sarif_reports: Vec::new(),
         }
     }
 }

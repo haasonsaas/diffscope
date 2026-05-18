@@ -439,9 +439,15 @@ rule_priority:
 
 # Built-in plugins (enabled by default)
 plugins:
-  eslint: true          # JavaScript/TypeScript linting
-  semgrep: true         # Security-focused static analysis  
-  duplicate_filter: true # Remove duplicate comments
+  eslint: true             # JavaScript/TypeScript linting
+  semgrep: true            # Security-focused static analysis
+  duplicate_filter: true   # Remove duplicate comments
+  secret_scanner: true     # Regex-based secret detection on added lines
+  supply_chain: true       # Dependency manifest risk analysis
+  rust_compile: true       # Rust compile-regression analysis
+  sarif_reports:           # Optional SARIF/code-scanning reports, repo-local only
+    - codeql.sarif
+    - semgrep.sarif
 
 # Global exclusions
 exclude_patterns:

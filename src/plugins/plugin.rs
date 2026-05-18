@@ -39,6 +39,11 @@ impl PluginManager {
                 crate::plugins::builtin::RustCompileAnalyzer::new(),
             ));
         }
+        if !config.sarif_reports.is_empty() {
+            self.register_pre_analyzer(Arc::new(crate::plugins::builtin::SarifAnalyzer::new(
+                config.sarif_reports.clone(),
+            )));
+        }
         if config.duplicate_filter {
             self.register_post_processor(Arc::new(crate::plugins::builtin::DuplicateFilter::new()));
         }
@@ -131,6 +136,7 @@ mod tests {
             secret_scanner: false,
             supply_chain: false,
             rust_compile: false,
+            sarif_reports: Vec::new(),
         };
 
         manager.load_builtin_plugins(&config).await.unwrap();
@@ -149,6 +155,7 @@ mod tests {
             secret_scanner: true,
             supply_chain: true,
             rust_compile: false,
+            sarif_reports: Vec::new(),
         };
 
         manager.load_builtin_plugins(&config).await.unwrap();
@@ -167,6 +174,26 @@ mod tests {
             secret_scanner: false,
             supply_chain: false,
             rust_compile: true,
+            sarif_reports: Vec::new(),
+        };
+
+        manager.load_builtin_plugins(&config).await.unwrap();
+
+        assert_eq!(manager.pre_analyzers.len(), 1);
+        assert_eq!(manager.post_processors.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn load_builtin_plugins_registers_sarif_analyzer_when_reports_configured() {
+        let mut manager = PluginManager::new();
+        let config = PluginConfig {
+            eslint: false,
+            semgrep: false,
+            duplicate_filter: false,
+            secret_scanner: false,
+            supply_chain: false,
+            rust_compile: false,
+            sarif_reports: vec!["codeql.sarif".to_string()],
         };
 
         manager.load_builtin_plugins(&config).await.unwrap();
