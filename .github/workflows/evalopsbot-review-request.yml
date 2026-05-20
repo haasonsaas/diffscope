@@ -1,0 +1,73 @@
+name: EvalOpsBot requested review
+
+on:
+  pull_request:
+    types: [review_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    if: ${{ github.event.requested_reviewer.login == 'EvalOpsBot' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.EVALOPS_PR_LENS_TOKEN }}
+      TARGET_REPO: ${{ github.repository }}
+      TARGET_PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      REQUESTED_REVIEWER: ${{ github.event.requested_reviewer.login }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Require dispatch token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Set EVALOPS_PR_LENS_TOKEN for immediate EvalOpsBot review dispatch."
+            exit 2
+          fi
+
+      - name: Dispatch deep review
+        shell: bash
+        run: |
+          set -euo pipefail
+          dispatch_payload="$(
+            jq -n \
+              --arg target_repo "${TARGET_REPO}" \
+              --arg target_pr "${TARGET_REPO}#${TARGET_PR}" \
+              --arg requested_reviewer "${REQUESTED_REVIEWER}" \
+              --arg source "repo-review-request-workflow" \
+              --arg requester "${GITHUB_ACTOR}" \
+              '{
+                event_type: "evalopsbot-review-requested",
+                client_payload: {
+                  target_repo: $target_repo,
+                  target_pr: $target_pr,
+                  requested_reviewer: $requested_reviewer,
+                  source: $source,
+                  requester: $requester
+                }
+              }'
+          )"
+          gh api --method POST repos/evalops/.github/dispatches --input - <<<"${dispatch_payload}"
+
+      - name: Mark deep review queued
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_payload="$(
+            jq -n \
+              --arg state "pending" \
+              --arg context "evalops-pr-lens/meta-review" \
+              --arg description "Queued EvalOpsBot requested deep review" \
+              --arg target_url "${RUN_URL}" \
+              '{
+                state: $state,
+                context: $context,
+                description: $description,
+                target_url: $target_url
+              }'
+          )"
+          gh api --method POST "repos/${TARGET_REPO}/statuses/${HEAD_SHA}" --input - <<<"${status_payload}"
