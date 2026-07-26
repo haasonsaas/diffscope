@@ -645,13 +645,16 @@ impl ReviewTool for GitBlameTool {
                 if let Some(hunk) = blame.get_line(line_num) {
                     let oid = hunk.final_commit_id();
                     let short_hash = &oid.to_string()[..7.min(oid.to_string().len())];
-                    let sig = hunk.final_signature();
-                    let author = sig.name().unwrap_or("unknown");
-                    let when = sig.when();
-                    let epoch = when.seconds();
-                    let date = chrono::DateTime::from_timestamp(epoch, 0)
-                        .map(|dt| dt.format("%Y-%m-%d").to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                    let (author, date) = hunk
+                        .final_signature()
+                        .map(|sig| {
+                            let author = sig.name().unwrap_or("unknown").to_string();
+                            let date = chrono::DateTime::from_timestamp(sig.when().seconds(), 0)
+                                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            (author, date)
+                        })
+                        .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
 
                     // Get commit message (first line only)
                     let message = commit_message_cache
@@ -661,6 +664,7 @@ impl ReviewTool for GitBlameTool {
                                 .ok()
                                 .and_then(|c| {
                                     c.message()
+                                        .ok()
                                         .map(|m| m.lines().next().unwrap_or("").to_string())
                                 })
                                 .unwrap_or_default()

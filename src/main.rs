@@ -595,7 +595,7 @@ async fn main() -> Result<()> {
     };
 
     #[cfg(feature = "otel")]
-    let _otel_guard: Option<opentelemetry_sdk::trace::TracerProvider> = {
+    let _otel_guard: Option<opentelemetry_sdk::trace::SdkTracerProvider> = {
         let otel_enabled = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok();
         if otel_enabled {
             match opentelemetry_otlp::SpanExporter::builder()
@@ -603,11 +603,13 @@ async fn main() -> Result<()> {
                 .build()
             {
                 Ok(exporter) => {
-                    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-                        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-                        .with_resource(opentelemetry_sdk::Resource::new(vec![
-                            opentelemetry::KeyValue::new("service.name", "diffscope"),
-                        ]))
+                    let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                        .with_batch_exporter(exporter)
+                        .with_resource(
+                            opentelemetry_sdk::Resource::builder_empty()
+                                .with_service_name("diffscope")
+                                .build(),
+                        )
                         .build();
 
                     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
