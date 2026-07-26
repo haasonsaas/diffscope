@@ -44,10 +44,10 @@ sha2 = "0.10"
 jsonwebtoken = "10"
 base64 = "0.22"
 futures = "0.3"
-opentelemetry = { version = "0.27", features = ["trace"], optional = true }
-opentelemetry-otlp = { version = "0.27", features = ["trace", "tonic"], optional = true }
+opentelemetry = { version = "0.32", features = ["trace"], optional = true }
+opentelemetry-otlp = { version = "0.32", features = ["trace", "grpc-tonic"], optional = true }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
-tracing-opentelemetry = { version = "0.28", optional = true }
+tracing-opentelemetry = { version = "0.33", optional = true }
 
 [features]
 otel = ["opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "tracing-opentelemetry"]
