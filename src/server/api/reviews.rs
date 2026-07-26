@@ -9,7 +9,7 @@ pub(crate) async fn get_status(State(state): State<Arc<AppState>>) -> Json<Statu
         .and_then(|repo| {
             repo.head()
                 .ok()
-                .and_then(|h| h.shorthand().map(|s| s.to_string()))
+                .and_then(|h| h.shorthand().ok().map(|s| s.to_string()))
         });
 
     Json(StatusResponse {

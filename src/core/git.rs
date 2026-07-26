@@ -110,16 +110,12 @@ impl GitIntegration {
 
     pub fn get_current_branch(&self) -> Result<String> {
         let head = self.repo.head()?;
-        if let Some(name) = head.shorthand() {
-            Ok(name.to_string())
-        } else {
-            Ok("HEAD".to_string())
-        }
+        Ok(head.shorthand().unwrap_or("HEAD").to_string())
     }
 
     pub fn get_remote_url(&self) -> Result<Option<String>> {
         let remote = self.repo.find_remote("origin")?;
-        Ok(remote.url().map(|s| s.to_string()))
+        Ok(remote.url().ok().map(|url| url.to_string()))
     }
 
     pub fn get_recent_commits(&self, count: usize) -> Result<Vec<String>> {
@@ -134,7 +130,11 @@ impl GitIntegration {
 
             let oid = oid?;
             let commit = self.repo.find_commit(oid)?;
-            let summary = commit.summary().unwrap_or("No commit message");
+            let summary = commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or("No commit message");
             commits.push(summary.to_string());
         }
 
@@ -147,7 +147,7 @@ impl GitIntegration {
 
     pub fn get_default_branch(&self) -> Result<String> {
         if let Ok(reference) = self.repo.find_reference("refs/remotes/origin/HEAD") {
-            if let Some(target) = reference.symbolic_target() {
+            if let Some(target) = reference.symbolic_target().ok().flatten() {
                 if let Some(branch) = target.rsplit('/').next() {
                     return Ok(branch.to_string());
                 }
